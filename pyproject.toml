@@ -1,0 +1,9 @@
+[project]
+name = "dna-methylation-qc"
+version = "0.0.1"
+description = "DNA methylation microarray QC database"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.32.5",
+]
