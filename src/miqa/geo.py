@@ -1,5 +1,10 @@
 """
-Summary of https://www.ncbi.nlm.nih.gov/geo/info/overview.html on GEO concepts
+Gene Expression Omnibus (GEO) repository data retrieval utilities.
+
+This module provides functions for querying the Gene Expression Omnibus (GEO) API,
+collecting sample accession IDs, and downloading associated data files.
+
+Summary on GEO concepts at https://www.ncbi.nlm.nih.gov/geo/info/overview.html
 
 GPLxxx is a _platform_ type
 GSMxxx is a sequencing _sample_, done on a particular platform
@@ -12,8 +17,8 @@ GPL16304: HumanMethylation450 BeadChip
 GPL21145: MethylationEPIC
 """
 
+
 from dataclasses import dataclass
-from pprint import pprint
 from typing import Any, cast
 
 import httpx
@@ -25,7 +30,8 @@ E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
 
 
-def geo_list_studies():
+def list_studies():
+    """TODO: Paginate through the results"""
     url = E_UTILS_BASE + "/esearch.fcgi"
     params = {
         "db": "gds",
@@ -48,7 +54,7 @@ def geo_list_studies():
     return data['eSearchResult']
 
 
-def geo_get_summary(id):
+def get_summary(id: int | str) -> dict:
     url = E_UTILS_BASE + "/esummary.fcgi"
     params = {
         "db": "gds",
@@ -84,7 +90,7 @@ def parse_field_value(field):
             return None
 
 
-def parse_summary_item(item) -> dict[str, Any]:
+def parse_summary_item(item: dict[str, Any]) -> dict[str, Any]:
     return {
         field['@Name']: parse_field_value(field)
         for field in item
@@ -98,7 +104,7 @@ class SampleSuppFile:
     url: str
 
 
-def geo_get_sample(accession_id) -> list[SampleSuppFile]:
+def get_sample(accession_id) -> list[SampleSuppFile]:
     url = GEO_FTP_BASE + f'/samples/{accession_id[:-3]}nnn/{accession_id}/suppl/'
     res = httpx.get(url)
 
@@ -112,32 +118,3 @@ def geo_get_sample(accession_id) -> list[SampleSuppFile]:
         SampleSuppFile(accession_id, href, url + href)
         for a in anchors if (href := cast(str, a.get('href'))).endswith('.gz')
     ]
-
-
-def streamed_download(url, filename):
-    with httpx.stream('GET', url) as response:
-        with open(filename, 'wb') as f:
-            for chunk in response.iter_bytes():
-                f.write(chunk)
-
-
-if __name__ == "__main__":
-    try:
-        result = geo_list_studies()
-        count = result.get('Count')
-        id_list = result.get('IdList', {}).get('Id', [])
-
-        print(f"Query total count: {count}")
-        print(f"Number of IDs returned: {len(id_list)}")
-
-        print(f"First ID {id_list[0]}")
-        summary = geo_get_summary(id_list[0])
-        study = parse_summary_item(summary['DocSum']['Item'])
-        files = geo_get_sample(study['Samples'][0]['Accession'])
-        # pprint(files)
-        print(files[0])
-        streamed_download(files[0].url, files[0].filename)
-
-
-    except Exception as e:
-        raise

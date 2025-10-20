@@ -18,6 +18,14 @@ dependencies = [
     "xmltodict>=1.0.2",
 ]
 
+[build-system]
+requires = ["setuptools"]
+requires-python = "==3.13.*"
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
