@@ -12,13 +12,17 @@ GPL16304: HumanMethylation450 BeadChip
 GPL21145: MethylationEPIC
 """
 
+from dataclasses import dataclass
 from pprint import pprint
+from typing import Any, cast
 
 import httpx
 import xmltodict
+from bs4 import BeautifulSoup
 
 
 E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
 
 
 def geo_list_studies():
@@ -44,7 +48,7 @@ def geo_list_studies():
     return data['eSearchResult']
 
 
-def geo_get_study(id):
+def geo_get_summary(id):
     url = E_UTILS_BASE + "/esummary.fcgi"
     params = {
         "db": "gds",
@@ -53,7 +57,9 @@ def geo_get_study(id):
     res = httpx.get(url, params=params)
 
     if res.status_code != 200:
-        raise Exception(f"Request failed with status code: {res.status_code}")
+        raise RuntimeError(
+            f"Request for summary failed with status: {res.status_code}"
+        )
 
     data = xmltodict.parse(res.text)
     return data['eSummaryResult']
@@ -78,11 +84,41 @@ def parse_field_value(field):
             return None
 
 
-def parse_summary_item(item):
+def parse_summary_item(item) -> dict[str, Any]:
     return {
         field['@Name']: parse_field_value(field)
         for field in item
     }
+
+
+@dataclass
+class SampleSuppFile:
+    accession_id: str
+    filename: str
+    url: str
+
+
+def geo_get_sample(accession_id) -> list[SampleSuppFile]:
+    url = GEO_FTP_BASE + f'/samples/{accession_id[:-3]}nnn/{accession_id}/suppl/'
+    res = httpx.get(url)
+
+    if res.status_code != 200:
+        raise RuntimeError(
+            f"Request for sampling listing failed with status: {res.status_code}"
+        )
+
+    anchors = BeautifulSoup(res.text, 'html.parser').select('pre a')
+    return [
+        SampleSuppFile(accession_id, href, url + href)
+        for a in anchors if (href := cast(str, a.get('href'))).endswith('.gz')
+    ]
+
+
+def streamed_download(url, filename):
+    with httpx.stream('GET', url) as response:
+        with open(filename, 'wb') as f:
+            for chunk in response.iter_bytes():
+                f.write(chunk)
 
 
 if __name__ == "__main__":
@@ -95,7 +131,13 @@ if __name__ == "__main__":
         print(f"Number of IDs returned: {len(id_list)}")
 
         print(f"First ID {id_list[0]}")
-        pprint(parse_summary_item(geo_get_study(id_list[0])['DocSum']['Item']))
+        summary = geo_get_summary(id_list[0])
+        study = parse_summary_item(summary['DocSum']['Item'])
+        files = geo_get_sample(study['Samples'][0]['Accession'])
+        # pprint(files)
+        print(files[0])
+        streamed_download(files[0].url, files[0].filename)
+
 
     except Exception as e:
         raise
