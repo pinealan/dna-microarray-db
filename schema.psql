@@ -1,0 +1,16 @@
+create type gender as enum (
+    'male', 'female'
+);
+
+create table platform (
+    name text primary key
+);
+
+create table sample (
+    file_uri text not null,
+    -- metadata
+    platform text references platform,
+    gender gender,
+    extraction_protocol text,
+    extras jsonb
+);
