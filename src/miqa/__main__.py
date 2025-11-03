@@ -14,7 +14,7 @@ def fetch_geo():
         for sample in study['Samples']:
             # TODO: Collect sample metadata
             sample_accession = sample['Accession']
-            files = geo.get_sample(sample_accession)
+            files = geo.get_sample_files(sample_accession)
             for f in files:
                 streamed_download(f.url, f.filename)
 

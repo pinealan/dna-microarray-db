@@ -31,11 +31,11 @@ GEO_ACCN_BASE = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
 GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
 
 
-entrez_search_term = '(' + ' OR '.join([
-    f'{platform}[accn]'
-    for platform in ['GPL13534', 'GPL21145', 'GPL16304']
-]) + ') AND idat[suppFile]'
+platforms = ['GPL13534', 'GPL21145', 'GPL16304']
 
+# --------------------
+# GEO Accession Display endpoint crawler/fetcher
+# --------------------
 
 def geo_lookup(accession_id, extra_params={}):
     url = GEO_ACCN_BASE
@@ -46,7 +46,8 @@ def geo_lookup(accession_id, extra_params={}):
         "form": "text"
     } | extra_params
     res = httpx.get(url, params=params)
-    return parse_soft_lines(res.iter_lines())
+    return res.text
+    # return parse_soft_lines(res.iter_lines())
 
 
 def parse_soft_lines(lines):
@@ -77,6 +78,15 @@ def parse_soft_lines(lines):
 
     return parsed_entities
 
+
+# --------------------
+# Entrez API crawler/fetcher
+# --------------------
+
+entrez_search_term = '(' + ' OR '.join([
+    f'{platform}[accn]'
+    for platform in platforms
+]) + ') AND idat[suppFile]'
 
 def list_studies():
     """TODO: Paginate through the results"""
@@ -146,6 +156,10 @@ def parse_summary_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# --------------------
+# GEO files fetcher
+# --------------------
+
 @dataclass
 class SampleSuppFile:
     accession_id: str
@@ -165,7 +179,7 @@ def get_series(accession_id) -> list[SampleSuppFile]:
     return res
 
 
-def get_sample(accession_id) -> list[SampleSuppFile]:
+def get_sample_files(accession_id) -> list[SampleSuppFile]:
     url = GEO_FTP_BASE + f'/samples/{accession_id[:-3]}nnn/{accession_id}/suppl/'
     res = httpx.get(url)
 
@@ -198,3 +212,5 @@ if __name__ == "__main__":
     print('GEO lookup of a series')
     series = geo_lookup(study['Accession'], {"view": "full"})
     pprint(series)
+
+    pprint(geo_lookup('GPL13534', {"targ": "self", "view": "brief"}))
