@@ -17,7 +17,7 @@ GPL16304: HumanMethylation450 BeadChip
 GPL21145: MethylationEPIC
 """
 
-
+import sys
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -46,44 +46,58 @@ def geo_lookup(accession_id, extra_params={}):
         "form": "text"
     } | extra_params
     res = httpx.get(url, params=params)
-    return res.text
-    # return parse_soft_lines(res.iter_lines())
+    return parse_soft_lines(res.iter_lines())
+
+
+class SoftParser:
+    def __init__(self):
+        self.parsed = []
+        self.current = {}
+
+    def parse_line(self, line):
+        first_char = line[0]
+        # New entity identified
+        if first_char == '^':
+            if len(self.current) > 0:
+                self.parsed.append(self.current)
+                self.current = {}
+            entity_header = line[1:].strip().split(' = ')
+            self.current['entity_type'] = entity_header[0]
+            self.current['entity_id'] = entity_header[1]
+
+        # Continuation of attributes for current entity
+        elif first_char == '!':
+            split_res = line[1:].strip().split(' = ')
+            if len(split_res) < 2:
+                return
+
+            attr, val = split_res
+            attr_prefix_len = len(self.current['entity_type']) + 1
+            attr = attr[attr_prefix_len:]
+            if attr in self.current:
+                if isinstance(self.current[attr], list):
+                    self.current[attr].append(val)
+                else:
+                    self.current[attr] = [self.current[attr], val]
+            else:
+                self.current[attr] = val
+
+    def parse_lines(self, lines):
+        for line in lines:
+            try:
+                self.parse_line(line)
+            except Exception as e:
+                print(line, file=sys.stderr)
+                raise e
+        if len(self.current) > 0:
+            self.parsed.append(self.current)
+
+        return self.parsed
 
 
 def parse_soft_lines(lines):
     """Parse a sequence of lines that is in the Soft format"""
-    parsed_entities = []
-    current_entity = {}
-
-    for line in lines:
-        first_char = line[0]
-        # New entity identified
-        if first_char == '^':
-            if len(current_entity) > 0:
-                parsed_entities.append(current_entity)
-                current_entity = {}
-            entity_header = line[1:].strip().split(' = ')
-            current_entity['entity_type'] = entity_header[0]
-            current_entity['entity_id'] = entity_header[1]
-
-        # Continuation of attributes for current entity
-        elif first_char == '!':
-            attr, val = line[1:].strip().split(' = ')
-            attr_prefix_len = len(current_entity['entity_type']) + 1
-            attr = attr[attr_prefix_len:]
-            if attr in current_entity:
-                if isinstance(current_entity[attr], list):
-                    current_entity[attr].append(val)
-                else:
-                    current_entity[attr] = [current_entity[attr], val]
-            else:
-                current_entity[attr] = val
-
-    # Wrap up last parsed entity
-    if len(current_entity) > 0:
-        parsed_entities.append(current_entity)
-
-    return parsed_entities
+    return SoftParser().parse_lines(lines)
 
 
 # --------------------
@@ -206,18 +220,18 @@ def get_sample_files(accession_id) -> list[SampleSuppFile]:
 if __name__ == "__main__":
     from pprint import pprint
 
-    query_res = list_studies()
-    # pprint(query_res)
-
-    id_list = query_res.get('IdList', {}).get('Id', [])
-    study_id = id_list[0]
-
-    summary = get_study_summary(study_id)
-    study = parse_summary_item(summary['DocSum']['Item'])
-    pprint(study)
-
-    print('GEO lookup of a series')
-    series = geo_lookup(study['Accession'], {"view": "full"})
-    pprint(series)
+    # query_res = list_studies()
+    # # pprint(query_res)
+    #
+    # id_list = query_res.get('IdList', {}).get('Id', [])
+    # study_id = id_list[0]
+    #
+    # summary = get_study_summary(study_id)
+    # study = parse_summary_item(summary['DocSum']['Item'])
+    # pprint(study)
+    #
+    # print('GEO lookup of a series')
+    # series = geo_lookup(study['Accession'], {"view": "full"})
+    # pprint(series)
 
     pprint(geo_lookup('GPL13534', {"targ": "self", "view": "brief"}))
