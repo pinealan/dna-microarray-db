@@ -70,7 +70,14 @@ def parse_soft_lines(lines):
         elif first_char == '!':
             attr, val = line[1:].strip().split(' = ')
             attr_prefix_len = len(current_entity['entity_type']) + 1
-            current_entity[attr[attr_prefix_len:]] = val
+            attr = attr[attr_prefix_len:]
+            if attr in current_entity:
+                if isinstance(current_entity[attr], list):
+                    current_entity[attr].append(val)
+                else:
+                    current_entity[attr] = [current_entity[attr], val]
+            else:
+                current_entity[attr] = val
 
     # Wrap up last parsed entity
     if len(current_entity) > 0:
