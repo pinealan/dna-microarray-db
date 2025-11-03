@@ -27,7 +27,55 @@ from bs4 import BeautifulSoup
 
 
 E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+GEO_ACCN_BASE = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
 GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
+
+
+entrez_search_term = '(' + ' OR '.join([
+    f'{platform}[accn]'
+    for platform in ['GPL13534', 'GPL21145', 'GPL16304']
+]) + ') AND idat[suppFile]'
+
+
+def geo_lookup(accession_id, extra_params={}):
+    url = GEO_ACCN_BASE
+    params = {
+        "acc": accession_id,
+        "targ": "self",
+        "view": "brief",
+        "form": "text"
+    } | extra_params
+    res = httpx.get(url, params=params)
+    return parse_soft_lines(res.iter_lines())
+
+
+def parse_soft_lines(lines):
+    """Parse a sequence of lines that is in the Soft format"""
+    parsed_entities = []
+    current_entity = {}
+
+    for line in lines:
+        first_char = line[0]
+        # New entity identified
+        if first_char == '^':
+            if len(current_entity) > 0:
+                parsed_entities.append(current_entity)
+                current_entity = {}
+            entity_header = line[1:].strip().split(' = ')
+            current_entity['entity_type'] = entity_header[0]
+            current_entity['entity_id'] = entity_header[1]
+
+        # Continuation of attributes for current entity
+        elif first_char == '!':
+            attr, val = line[1:].strip().split(' = ')
+            attr_prefix_len = len(current_entity['entity_type']) + 1
+            current_entity[attr[attr_prefix_len:]] = val
+
+    # Wrap up last parsed entity
+    if len(current_entity) > 0:
+        parsed_entities.append(current_entity)
+
+    return parsed_entities
 
 
 def list_studies():
@@ -35,8 +83,9 @@ def list_studies():
     url = E_UTILS_BASE + "/esearch.fcgi"
     params = {
         "db": "gds",
-        "term": "(GPL13534[Platform] OR GPL21145[Platform] OR GPL16304[Platform]) AND idat[suppFile]",
-        "retMax": 5000,
+        "term": entrez_search_term,
+        # "retMax": 5000,
+        "retMax": 5,
     }
     res = httpx.get(url, params=params)
 
@@ -54,7 +103,7 @@ def list_studies():
     return data['eSearchResult']
 
 
-def get_summary(id: int | str) -> dict:
+def get_study_summary(id: int | str) -> dict:
     url = E_UTILS_BASE + "/esummary.fcgi"
     params = {
         "db": "gds",
@@ -104,6 +153,18 @@ class SampleSuppFile:
     url: str
 
 
+def get_series(accession_id) -> list[SampleSuppFile]:
+    url = GEO_FTP_BASE + f'/series/{accession_id[:-3]}nnn/{accession_id}/'
+    res = httpx.get(url)
+
+    if res.status_code != 200:
+        raise RuntimeError(
+            f"Request for sampling listing failed with status: {res.status_code}"
+        )
+
+    return res
+
+
 def get_sample(accession_id) -> list[SampleSuppFile]:
     url = GEO_FTP_BASE + f'/samples/{accession_id[:-3]}nnn/{accession_id}/suppl/'
     res = httpx.get(url)
@@ -118,3 +179,22 @@ def get_sample(accession_id) -> list[SampleSuppFile]:
         SampleSuppFile(accession_id, href, url + href)
         for a in anchors if (href := cast(str, a.get('href'))).endswith('.gz')
     ]
+
+
+# Use module main as integration test
+if __name__ == "__main__":
+    from pprint import pprint
+
+    query_res = list_studies()
+    # pprint(query_res)
+
+    id_list = query_res.get('IdList', {}).get('Id', [])
+    study_id = id_list[0]
+
+    summary = get_study_summary(study_id)
+    study = parse_summary_item(summary['DocSum']['Item'])
+    pprint(study)
+
+    print('GEO lookup of a series')
+    series = geo_lookup(study['Accession'], {"view": "full"})
+    pprint(series)

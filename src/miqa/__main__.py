@@ -9,7 +9,7 @@ def fetch_geo():
     id_list = query_res.get('IdList', {}).get('Id', [])
 
     for study_id in id_list:
-        summary = geo.get_summary(study_id)
+        summary = geo.get_study_summary(study_id)
         study = geo.parse_summary_item(summary['DocSum']['Item'])
         for sample in study['Samples']:
             # TODO: Collect sample metadata
