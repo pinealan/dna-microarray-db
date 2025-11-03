@@ -17,21 +17,26 @@ GPL16304: HumanMethylation450 BeadChip
 GPL21145: MethylationEPIC
 """
 
+import logging
 import sys
 from dataclasses import dataclass
-from typing import Any, cast
+from pathlib import Path
+from typing import cast
 
 import httpx
-import xmltodict
 from bs4 import BeautifulSoup
+
+from miqa.utils import streamed_download
 
 
 E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 GEO_ACCN_BASE = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
 GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
 
-
 platforms = ['GPL13534', 'GPL21145', 'GPL16304']
+
+logger = logging.getLogger()
+
 
 # --------------------
 # GEO Accession Display endpoint crawler/fetcher
@@ -49,7 +54,19 @@ def geo_lookup(accession_id, extra_params={}):
     return parse_soft_lines(res.iter_lines())
 
 
+def geo_exact_lookup(accession_id, *args, **kwargs):
+    res = geo_lookup(accession_id, *args, **kwargs)
+    if len(res) > 1:
+        raise ValueError(f'Received more than 1 item from exact lookup of {accession_id}')
+    return res[0]
+
+
 class SoftParser:
+    """
+    Parser for the SOFT format used by GEO data repo.
+
+    Does not support parsing data tables.
+    """
     def __init__(self):
         self.parsed = []
         self.current = {}
@@ -109,36 +126,37 @@ entrez_search_term = '(' + ' OR '.join([
     for platform in platforms
 ]) + ') AND idat[suppFile]'
 
-def list_studies():
+
+def e_search_series(extra_params={}):
     """TODO: Paginate through the results"""
     url = E_UTILS_BASE + "/esearch.fcgi"
     params = {
         "db": "gds",
         "term": entrez_search_term,
-        # "retMax": 5000,
-        "retMax": 5,
-    }
+        "retMax": 10000,
+        "retmode": "json",
+    } | extra_params
     res = httpx.get(url, params=params)
 
     # Check if the request was successful
     if res.status_code != 200:
         raise Exception(f"Request failed with status code: {res.status_code}")
 
-    # Parse the XML response into a dictionary
-    data = xmltodict.parse(res.text)
+    data = res.json()
 
     # Access specific elements (example)
-    if 'eSearchResult' not in data:
+    if 'esearchresult' not in data:
         raise Exception(f"Data seems malformed. {data}")
 
-    return data['eSearchResult']
+    return data['esearchresult']
 
 
-def get_study_summary(id: int | str) -> dict:
+def e_summary(id: int | str) -> dict:
     url = E_UTILS_BASE + "/esummary.fcgi"
     params = {
         "db": "gds",
         "id": id,
+        "retmode": "json",
     }
     res = httpx.get(url, params=params)
 
@@ -147,34 +165,7 @@ def get_study_summary(id: int | str) -> dict:
             f"Request for summary failed with status: {res.status_code}"
         )
 
-    data = xmltodict.parse(res.text)
-    return data['eSummaryResult']
-
-
-def parse_field_value(field):
-    ftype = field['@Type']
-
-    if ftype == 'List':
-        return [parse_field_value(node) for node in field.get('Item', [])]
-    elif ftype == 'Structure':
-        return {
-            node['@Name']: parse_field_value(node)
-            for node in field.get('Item', [])
-        }
-    elif ftype == 'String':
-        return field.get('#text', '')
-    elif ftype == 'Integer':
-        if (x := field.get('#text')) is not None:
-            return x
-        else:
-            return None
-
-
-def parse_summary_item(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        field['@Name']: parse_field_value(field)
-        for field in item
-    }
+    return res.json()
 
 
 # --------------------
@@ -188,7 +179,7 @@ class SampleSuppFile:
     url: str
 
 
-def get_series(accession_id) -> list[SampleSuppFile]:
+def geo_ftp_series(accession_id) -> httpx.Response:
     url = GEO_FTP_BASE + f'/series/{accession_id[:-3]}nnn/{accession_id}/'
     res = httpx.get(url)
 
@@ -200,7 +191,7 @@ def get_series(accession_id) -> list[SampleSuppFile]:
     return res
 
 
-def get_sample_files(accession_id) -> list[SampleSuppFile]:
+def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
     url = GEO_FTP_BASE + f'/samples/{accession_id[:-3]}nnn/{accession_id}/suppl/'
     res = httpx.get(url)
 
@@ -216,22 +207,65 @@ def get_sample_files(accession_id) -> list[SampleSuppFile]:
     ]
 
 
+# --------------------
+# GEO crawler entrypoint
+# --------------------
+# TODO
+# [ ] Walk the list of series/samples to aggregate metadata
+# [ ] Download files and put them to S3
+# [ ] Insert sample details (S3 paths and metadata) into DB
+
+
+def collect_idats_of_platform(platform):
+    geo_info = geo_exact_lookup(platform)
+
+    all_series = geo_info['series_id']
+    all_samples = geo_info['sample_id']
+    logger.debug(f'Series count = {len(all_series)}')
+    logger.debug(f'Sample count = {len(all_samples)}')
+
+    # tmp for dev
+    max_fetch = 10
+    cnt_fetch = 0
+
+    for sample_id in all_samples[100000:]:
+
+        # tmp for dev
+        if cnt_fetch >= max_fetch:
+            return
+
+        sample = geo_exact_lookup(sample_id)
+
+        if sample['supplementary_file'] == 'NONE':
+            logger.debug(f'Sample has no supplementary files {sample_id=}')
+            continue
+
+        for fpath in sample['supplementary_file']:
+            fpath = 'https' + fpath[3:]
+            # TODO: Stream to S3
+            streamed_download(fpath, Path(fpath).name)
+
+        # TODO: Construct and insert sample detail
+
+        cnt_fetch += 1
+        pprint(sample)
+        logger.info(f'Sample idats fetched {sample_id=}')
+
+
+def collect_idats():
+    for plat in platforms:
+        collect_idats_of_platform(plat)
+
+
 # Use module main as integration test
 if __name__ == "__main__":
     from pprint import pprint
 
-    # query_res = list_studies()
-    # # pprint(query_res)
-    #
-    # id_list = query_res.get('IdList', {}).get('Id', [])
-    # study_id = id_list[0]
-    #
-    # summary = get_study_summary(study_id)
-    # study = parse_summary_item(summary['DocSum']['Item'])
-    # pprint(study)
-    #
-    # print('GEO lookup of a series')
-    # series = geo_lookup(study['Accession'], {"view": "full"})
-    # pprint(series)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+    )
+    logging.getLogger('httpcore').setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
-    pprint(geo_lookup('GPL13534', {"targ": "self", "view": "brief"}))
+    collect_idats_of_platform(platforms[0])
