@@ -260,12 +260,9 @@ def collect_idats():
 # Use module main as integration test
 if __name__ == "__main__":
     from pprint import pprint
+    from miqa.utils import setup_logging
 
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
-    )
-    logging.getLogger('httpcore').setLevel(logging.INFO)
+    setup_logging()
     logger.setLevel(logging.DEBUG)
 
     collect_idats_of_platform(platforms[0])
