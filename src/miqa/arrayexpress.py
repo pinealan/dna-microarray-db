@@ -32,19 +32,20 @@ def list_studies():
 
 def study_details(accession):
     resp = httpx.get(f"{STUDY_BASE}/{accession}").json()
+    return resp
 
     # Reorganise study struct into something that makes a bit more sense
-    info = {
-        'metadata': lift_attrs(tz.dissoc(resp, 'section')),
-        'ftp_dir': httpx.get(f"{STUDY_BASE}/{accession}/info").json()['ftpLink']
-    }
-    info |= attrs_to_dict(resp['section']['attributes'])
-    info['child_items'] = {
-        s.get('accno'): lift_attrs(s)
-        for s in resp['section']['subsections']
-        if isinstance(s, dict)
-    }
-    return info
+    # info = {
+    #     'metadata': lift_attrs(tz.dissoc(resp, 'section')),
+    #     'ftp_dir': httpx.get(f"{STUDY_BASE}/{accession}/info").json()['ftpLink']
+    # }
+    # info |= attrs_to_dict(resp['section']['attributes'])
+    # info['child_items'] = {
+    #     s.get('accno'): lift_attrs(s)
+    #     for s in resp['section']['subsections']
+    #     if isinstance(s, dict)
+    # }
+    # return info
 
 
 def lift_attrs(item):
