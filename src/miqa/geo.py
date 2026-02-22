@@ -37,8 +37,6 @@ E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 GEO_ACCN_BASE = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
 GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
 
-platforms = ['GPL13534', 'GPL21145', 'GPL16304']
-
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +51,7 @@ class GEODataError(GEOError):
 
 
 # --------------------
-# GEO Accession Display endpoint crawler/fetcher
+# GEO Accession Display endpoint fetcher
 # --------------------
 
 def geo_lookup(accession_id: str, extra_params={}) -> list[dict]:
@@ -138,22 +136,20 @@ def parse_soft_lines(lines: Iterable[str]) -> list[dict]:
 
 
 # --------------------
-# Entrez API crawler/fetcher
-# (unused as of now)
+# Entrez API crawler
 # --------------------
 
-entrez_search_term = '(' + ' OR '.join([
-    f'{platform}[accn]'
-    for platform in platforms
-]) + ') AND idat[suppFile]'
+def e_search(**extra_params):
+    """
+    Query the Entrez eSearch program.
 
-
-def e_search_series(extra_params={}):
-    """TODO: Paginate through the results"""
+    See the following links for docs on the endpoint.
+    - https://www.ncbi.nlm.nih.gov/geo/info/qqtutorial.html
+    - https://www.ncbi.nlm.nih.gov/geo/info/geo_paccess.html
+    """
     url = E_UTILS_BASE + "/esearch.fcgi"
     params = {
         "db": "gds",
-        "term": entrez_search_term,
         "retMax": 10000,
         "retmode": "json",
     } | extra_params
@@ -161,15 +157,25 @@ def e_search_series(extra_params={}):
 
     # Check if the request was successful
     if res.status_code != 200:
-        raise Exception(f"Request failed with status code: {res.status_code}")
+        raise GEOError(f"Request failed with status code: {res.status_code}")
 
     data = res.json()
 
     # Access specific elements (example)
     if 'esearchresult' not in data:
-        raise Exception(f"Data seems malformed. {data}")
+        raise GEODataError(f"Data seems malformed. {data}")
 
     return data['esearchresult']
+
+
+def e_search_all(**extra_params):
+    """
+    Paginate through results of a query on the Entrez eSearch program.
+    """
+    res = e_search(**extra_params)
+    while (n := len(res['idlist'])) > 0:
+        yield from res['idlist']
+        res = e_search(**extra_params, retstart=int(res['retstart']) + n)
 
 
 def e_summary(id: int | str) -> dict:
@@ -190,7 +196,7 @@ def e_summary(id: int | str) -> dict:
 
 
 # --------------------
-# GEO files fetcher
+# GEO FTP fetcher
 # (unused as of now)
 # --------------------
 
@@ -230,8 +236,34 @@ def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
 
 
 # --------------------
-# Metadata extraction helpers
+# Metadata extraction
 # --------------------
+
+
+def enrich_series():
+    """TODO"""
+    return
+
+
+def find_idat_files(sample) -> list[str] | None:
+    """Extract the idat file FTP paths of the given sample."""
+    series_id = sample['series_id']
+
+    # Ensure there are supplementary files
+    supp = sample.get('supplementary_file', 'NONE')
+    if supp == 'NONE' or len(supp) == 0:
+        logger.debug(f'Sample has no supplementary files {series_id=}')
+        return
+
+    # Ensure there are idat(s)
+    assert_list_str(supp)
+    idat_files = [f for f in supp if '.idat' in f.lower()]
+    if not idat_files:
+        logger.debug(f'No IDAT files for {series_id=}')
+        return
+
+    return idat_files
+
 
 _CHAR_PATTERNS: list[tuple[str, str]] = [
     # Each tuple is (Regex pattern, Attribute name)
@@ -343,6 +375,110 @@ def enrich_sample(sample: dict) -> dict[str, Any]:
 # --------------------
 
 
+platforms = ['GPL13534', 'GPL21145', 'GPL16304']
+
+
+series_with_idat_search_term = ' AND '.join([
+    'idat[suppFile]',
+    'gse[Entry Type]',
+    f'({' OR '.join([p + '[accn]' for p in platforms])})'
+])
+
+
+def crawl_and_process(
+    conn: psycopg.Connection | None = None,
+    dry_run: bool = False,
+):
+    if not dry_run and conn is None:
+        raise RuntimeError('DB connection must be provided when not dry-run.')
+
+    entrez_ids = e_search_all(term=series_with_idat_search_term)
+    cnt = 0
+
+    # TODO: Check against database to avoid retreading processed series/samples
+
+    for eid in entrez_ids:
+
+        # Look into entrez's record for corresponding GEO accession ID
+        # TODO: eSummary supports fetching more than 1 ID at a time. We can save some
+        # network calls if we do it that way.
+        series_id = e_summary(eid)['result'][eid]['accession']
+        series = geo_exact_lookup(series_id)
+
+        # TODO: Extract metadata from series, so we can pass it on later to samples
+
+        for sample_id in series['sample_id']:
+
+            # Process a single sample
+            sample = geo_exact_lookup(sample_id)
+            if (idat_files := find_idat_files(sample)) is None:
+                continue
+            sample_enriched = enrich_sample(sample)
+
+            # Dryrun short circuit and log
+            if dry_run:
+                logger.info(f'[dry-run] Would insert sample {sample_id} {sample_enriched=}')
+                for fpath in idat_files:
+                    logger.info(f'[dry-run] Would upload {fpath}')
+                continue
+            assert conn is not None
+
+            # Save sample to database
+            if (
+                db_id := save_sample(sample_id, sample_enriched, idat_files, conn)
+            ) is not None:
+                cnt += 1
+                logger.info(f'{sample_id=} inserted as {db_id=}')
+
+
+def save_sample(
+    sample_id: str,
+    sample_enriched: dict,
+    idat_files: list[str],
+    conn: psycopg.Connection,
+) -> int | None:
+
+    # Insert sample as DB record
+    db_sample_id = db.upsert_sample(
+        conn,
+        repository_id='geo',
+        repository_sample_id=sample_id,
+        **sample_enriched,
+    )
+
+    # Insert each idat as DB record and download to storage
+    for fpath in idat_files:
+
+        # Replace ftp:// with https://
+        # We are using HTTP to fetch the files instead of FTP because their FTP
+        # server doesn't seem to work
+        fpath = 'https' + fpath[3:] if fpath.startswith('ftp') else fpath
+        filename = Path(fpath).name
+        s3_key = f'geo/{sample_id}/{filename}'
+
+        idat_id = db.insert_idat_file(
+            conn,
+            sample_id=db_sample_id,
+            source_url=fpath,
+            channel=get_idat_channel(filename),
+        )
+
+        # Download file to tmp local storage, then upload to S3
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_path = Path(tmpdir) / filename
+            streamed_download(fpath, str(local_path))
+            storage.upload_file(local_path, s3_key)
+
+            # TODO perhaps we should also process the idat file(s) rightaway, and S3
+            # serves more as a short term mirror such that we can have easy access
+            # to the file if inspections are needed? (like 30 retention)
+
+        db.mark_idat_uploaded(conn, idat_id, s3_key)
+        logger.info(f'Uploaded {s3_key}')
+
+    return db_sample_id
+
+
 def get_idat_channel(filename: str) -> str:
     if '_Grn' in filename:
         return 'Grn'
@@ -352,108 +488,32 @@ def get_idat_channel(filename: str) -> str:
         raise GEODataError()
 
 
-def collect_idats_of_platform(
-    platform,
-    limit: int | None = None,
-    conn: psycopg.Connection | None = None,
-    dry_run: bool = False,
-):
-    if not dry_run and conn is None:
-        raise RuntimeError('DB connection must be provided when not dry-run.')
-
-    geo_info = geo_exact_lookup(platform)
-
-    all_series = geo_info['series_id']
-    all_samples = geo_info['sample_id']
-    logger.debug(f'Series count = {len(all_series)}')
-    logger.debug(f'Sample count = {len(all_samples)}')
-
-    assert_list_str(all_samples)
-
-    cnt = 0
-    for sample_id in all_samples:
-        if limit is not None and cnt >= limit:
-            break
-
-        sample = geo_exact_lookup(sample_id)
-
-        # Ensure there are supplementary files
-        supp = sample.get('supplementary_file', 'NONE')
-        if supp == 'NONE' or len(supp) == 0:
-            logger.debug(f'Sample has no supplementary files {sample_id=}')
-            continue
-
-        # Ensure there are idat(s)
-        assert_list_str(supp)
-        idat_files = [f for f in supp if '.idat' in f.lower()]
-        if not idat_files:
-            logger.debug(f'No IDAT files for {sample_id=}')
-            continue
-
-        meta = enrich_sample(sample)
-
-        # Dry-run short circuit and log
-        if dry_run:
-            logger.info(f'[dry-run] Would insert sample {sample_id} meta={meta}')
-            for fpath in idat_files:
-                logger.info(f'[dry-run] Would upload {fpath}')
-            cnt += 1
-            continue
-
-        assert conn is not None
-
-        # Insert sample as DB record
-        db_sample_id = db.upsert_sample(
-            conn,
-            repository_id='geo',
-            repository_sample_id=sample_id,
-            **meta,
-        )
-
-        # Insert each idat as DB record and download to storage
-        for fpath in idat_files:
-
-            # Replace ftp:// with https://
-            # We are using HTTP to fetch the files instead of FTP because their FTP
-            # server doesn't seem to work
-            fpath = 'https' + fpath[3:] if fpath.startswith('ftp') else fpath
-            filename = Path(fpath).name
-            s3_key = f'geo/{sample_id}/{filename}'
-
-            idat_id = db.insert_idat_file(
-                conn,
-                sample_id=db_sample_id,
-                source_url=fpath,
-                channel=get_idat_channel(filename),
-            )
-
-            # Download file to tmp local storage, then upload to S3
-            with tempfile.TemporaryDirectory() as tmpdir:
-                local_path = Path(tmpdir) / filename
-                streamed_download(fpath, str(local_path))
-                storage.upload_file(local_path, s3_key)
-
-                # TODO perhaps we should also process the idat file(s) rightaway, and S3
-                # serves more as a short term mirror such that we can have easy access
-                # to the file if inspections are needed? (like 30 retention)
-
-            db.mark_idat_uploaded(conn, idat_id, s3_key)
-            logger.info(f'Uploaded {s3_key}')
-
-        cnt += 1
-        logger.info(f'Sample processed {sample_id=}')
-
-
-def collect_idats(limit: int | None = None, dry_run: bool = False):
-    for plat in platforms:
-        collect_idats_of_platform(plat, limit=limit, dry_run=dry_run)
-
-
 # Use module main as integration test
 if __name__ == "__main__":
+    from pprint import pprint
     from miqa.utils import setup_logging
 
     setup_logging()
     logger.setLevel(logging.DEBUG)
 
-    collect_idats_of_platform(platforms[0], limit=3, dry_run=True)
+    # Search Entrez records
+    res_esearch = e_search(
+        term=series_with_idat_search_term,
+        retMax=10,
+    )
+    pprint(res_esearch)
+
+    # Get Entrez record
+    eid = res_esearch['idlist'][0]
+    res_esum = e_summary(eid)
+    pprint(res_esum)
+
+    # Get GEO record of Series
+    series_accn = res_esum['result'][eid]['accession']
+    res_geo = geo_exact_lookup(series_accn)
+    pprint(res_geo)
+
+    # Get GEO record of Sample
+    sample_accn = res_geo['sample_id'][0]
+    res_geo = geo_exact_lookup(sample_accn)
+    pprint(res_geo)

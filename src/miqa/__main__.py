@@ -34,12 +34,11 @@ def _setup():
 
 @app.command(name="geo")
 def geo_cmd(
-    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Max samples to process"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
 ):
     """Crawl GEO for methylation IDAT files."""
     _setup()
-    geo.collect_idats(limit=limit, dry_run=dry_run)
+    geo.crawl_and_process(conn=None, dry_run=dry_run)
 
 
 @app.command()
@@ -59,7 +58,7 @@ def all(
 ):
     """Crawl both GEO and ArrayExpress."""
     _setup()
-    geo.collect_idats(limit=limit, dry_run=dry_run)
+    geo.crawl_and_process(conn=None, dry_run=dry_run)
     ae.collect_idats(limit=limit, dry_run=dry_run)
 
 
