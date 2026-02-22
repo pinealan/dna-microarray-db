@@ -42,11 +42,18 @@ create table if not exists idat_file (
     s3_key       text,             -- set when uploaded
     channel      text check (
         channel = 'Red' or channel = 'Grn'
-    ),             -- 'Red' or 'Grn'
+    ),
     uploaded_at  timestamptz,
     processed_at timestamptz,      -- set after QC extraction
     deleted_at   timestamptz       -- set after S3 deletion
 );
+
+-- TODO:
+-- 1. We will need the data model to hold QC metrics to be extracted from idat files.
+-- 2. Auditing of data processing and time when calculations are performed could be another area of interest.
+-- 3. Finally some attributes of a sample are extractable from the idats themselves (i.e. gender?),
+--    in which case do we separate that into a new table? Or extend the idat_file/sample table to
+--    hold these columns?
 
 -- Seed repositories
 insert into repository (id, name) values
