@@ -39,7 +39,7 @@ GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
 
 platforms = ['GPL13534', 'GPL21145', 'GPL16304']
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 class GEOError(Exception):
@@ -57,6 +57,12 @@ class GEODataError(GEOError):
 # --------------------
 
 def geo_lookup(accession_id: str, extra_params={}) -> list[dict]:
+    """
+    Core API access of GEO records.
+
+    See 'Construct a URL' section on https://www.ncbi.nlm.nih.gov/geo/info/download.html
+    for details of the query parameters.
+    """
     url = GEO_ACCN_BASE
     params = {
         "acc": accession_id,
@@ -227,13 +233,109 @@ def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
 # Metadata extraction helpers
 # --------------------
 
-def extract_sample_metadata(sample: dict) -> dict[str, Any]:
+_CHAR_PATTERNS: list[tuple[str, str]] = [
+    # Each tuple is (Regex pattern, Attribute name)
+    (r'tissue\s*:', 'tissue'),
+    (r'tissue type\s*:', 'tissue'),
+    (r'source tissue\s*:', 'tissue'),
+    (r'cell type\s*:', 'tissue'),
+    (r'disease\s*:', 'disease'),
+    (r'disease state\s*:', 'disease'),
+    (r'diagnosis\s*:', 'disease'),
+    (r'gender\s*:', 'gender'),
+    (r'sex\s*:', 'gender'),
+    (r'age\s*:', 'age'),
+    (r'age at diagnosis\s*:', 'age'),
+]
+
+_GENDER_MAP = {
+    'male': 'male',
+    'm': 'male',
+    'female': 'female',
+    'f': 'female',
+}
+
+
+def parse_characteristic(line: str) -> tuple[str, str] | None:
+    """
+    Parse a single characteristics_ch1 string like 'tissue: blood'.
+    Returns (field_name, value) for the first recognised field, or None if unrecognised.
+    """
+    for pattern, field in _CHAR_PATTERNS:
+        m = re.match(pattern, line, re.IGNORECASE)
+        if m:
+            extracted = line[m.end():].strip()
+            return field, extracted
+    return None
+
+
+def enrich_sample(sample: dict) -> dict[str, Any]:
     """
     Pull structured metadata out of a GEO SOFT sample dict.
     Returns a dict ready to be passed to db.upsert_sample().
     """
-    # TODO
-    return {}
+    structured: dict[str, Any] = {}
+    extras: dict[str, Any] = {}
+
+    # Series (parent GSE, if there are multiple of them, treat the first as canonical)
+    series_id = sample.get('series_id')
+    if isinstance(series_id, list):
+        series_id = series_id[0]
+    structured['series_id'] = series_id
+
+    # Platform
+    structured['platform_id'] = sample.get('platform_id')
+
+    # Parse characteristics_ch1 entries
+    chars = sample.get('characteristics_ch1', [])
+    if isinstance(chars, str):
+        chars = [chars]
+
+    remaining_chars = []
+    for char in chars:
+        parsed = parse_characteristic(char)
+        if parsed:
+            field, val = parsed
+            if field not in structured:
+                structured[field] = val
+        else:
+            remaining_chars.append(char)
+
+    if remaining_chars:
+        extras['characteristics_ch1'] = remaining_chars
+
+    # Extraction protocol
+    structured['extraction_protocol'] = sample.get('extract_protocol_ch1')
+
+    # Normalise gender
+    gender_raw = structured.pop('gender', None)
+    if gender_raw:
+        structured['gender'] = _GENDER_MAP.get(gender_raw.lower().strip())
+
+
+    # Everything else goes to extras
+    skip_keys = {
+        'entity_type', 'entity_id', 'series_id', 'platform_id',
+        'characteristics_ch1', 'extract_protocol_ch1', 'supplementary_file',
+    }
+    for k, v in sample.items():
+        if k not in skip_keys and k not in structured:
+            extras[k] = v
+
+    # TODO: fields to be processed
+    # [x] characteristics_ch1
+    # [ ] data_processing
+    # [ ] extract_protocol_ch1
+    # [ ] growth_protocol_ch1
+    # [ ] hyb_protocol
+    # [ ] label_ch1
+    # [ ] label_protocol_ch1
+    # [ ] hyb_protocol
+    # [ ] scan_protocol
+    # [ ] source_name_ch1
+
+    structured['extras'] = extras or None
+    return structured
 
 
 # --------------------
@@ -275,19 +377,20 @@ def collect_idats_of_platform(
 
         sample = geo_exact_lookup(sample_id)
 
+        # Ensure there are supplementary files
         supp = sample.get('supplementary_file', 'NONE')
-        if supp == 'NONE':
+        if supp == 'NONE' or len(supp) == 0:
             logger.debug(f'Sample has no supplementary files {sample_id=}')
             continue
 
+        # Ensure there are idat(s)
         assert_list_str(supp)
-
         idat_files = [f for f in supp if '.idat' in f.lower()]
         if not idat_files:
             logger.debug(f'No IDAT files for {sample_id=}')
             continue
 
-        meta = extract_sample_metadata(sample)
+        meta = enrich_sample(sample)
 
         # Dry-run short circuit and log
         if dry_run:
@@ -299,7 +402,7 @@ def collect_idats_of_platform(
 
         assert conn is not None
 
-        # Insert sample and idat to DB and Storage
+        # Insert sample as DB record
         db_sample_id = db.upsert_sample(
             conn,
             repository_id='geo',
@@ -307,6 +410,7 @@ def collect_idats_of_platform(
             **meta,
         )
 
+        # Insert each idat as DB record and download to storage
         for fpath in idat_files:
 
             # Replace ftp:// with https://
