@@ -13,10 +13,6 @@ class DBError(Exception):
     pass
 
 
-def get_connection() -> psycopg.Connection:
-    return psycopg.connect(config.DATABASE_URL)
-
-
 def upsert_sample(
     conn: psycopg.Connection,
     *,

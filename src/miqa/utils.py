@@ -15,3 +15,15 @@ def setup_logging():
         format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
     )
     logging.getLogger('httpcore').setLevel(logging.INFO)
+
+
+def assert_non_empty_list_str(v):
+    assert isinstance(v, list)
+    assert len(v) > 0
+    assert isinstance(v[0], str)
+
+
+def assert_list_str(v):
+    assert isinstance(v, list)
+    if len(v) > 0:
+        assert isinstance(v[0], str)

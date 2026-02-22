@@ -18,15 +18,19 @@ GPL21145: MethylationEPIC
 """
 
 import logging
+import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast, Iterable
 
 import httpx
+import psycopg
 from bs4 import BeautifulSoup
 
-from miqa.utils import streamed_download
+from miqa import db, storage
+from miqa.utils import assert_list_str, streamed_download
 
 
 E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -38,11 +42,21 @@ platforms = ['GPL13534', 'GPL21145', 'GPL16304']
 logger = logging.getLogger()
 
 
+class GEOError(Exception):
+    """GEO related exceptions."""
+    pass
+
+
+class GEODataError(GEOError):
+    """Found invalid GEO data during parsing."""
+    pass
+
+
 # --------------------
 # GEO Accession Display endpoint crawler/fetcher
 # --------------------
 
-def geo_lookup(accession_id, extra_params={}):
+def geo_lookup(accession_id: str, extra_params={}) -> list[dict]:
     url = GEO_ACCN_BASE
     params = {
         "acc": accession_id,
@@ -54,7 +68,7 @@ def geo_lookup(accession_id, extra_params={}):
     return parse_soft_lines(res.iter_lines())
 
 
-def geo_exact_lookup(accession_id, *args, **kwargs):
+def geo_exact_lookup(accession_id: str, *args, **kwargs) -> dict:
     res = geo_lookup(accession_id, *args, **kwargs)
     if len(res) > 1:
         raise ValueError(f'Received more than 1 item from exact lookup of {accession_id}')
@@ -112,13 +126,14 @@ class SoftParser:
         return self.parsed
 
 
-def parse_soft_lines(lines):
+def parse_soft_lines(lines: Iterable[str]) -> list[dict]:
     """Parse a sequence of lines that is in the Soft format"""
     return SoftParser().parse_lines(lines)
 
 
 # --------------------
 # Entrez API crawler/fetcher
+# (unused as of now)
 # --------------------
 
 entrez_search_term = '(' + ' OR '.join([
@@ -170,6 +185,7 @@ def e_summary(id: int | str) -> dict:
 
 # --------------------
 # GEO files fetcher
+# (unused as of now)
 # --------------------
 
 @dataclass
@@ -208,15 +224,41 @@ def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
 
 
 # --------------------
+# Metadata extraction helpers
+# --------------------
+
+def extract_sample_metadata(sample: dict) -> dict[str, Any]:
+    """
+    Pull structured metadata out of a GEO SOFT sample dict.
+    Returns a dict ready to be passed to db.upsert_sample().
+    """
+    # TODO
+    return {}
+
+
+# --------------------
 # GEO crawler entrypoint
 # --------------------
-# TODO
-# [ ] Walk the list of series/samples to aggregate metadata
-# [ ] Download files and put them to S3
-# [ ] Insert sample details (S3 paths and metadata) into DB
 
 
-def collect_idats_of_platform(platform):
+def get_idat_channel(filename: str) -> str:
+    if '_Grn' in filename:
+        return 'Grn'
+    elif '_Red' in filename:
+        return 'Red'
+    else:
+        raise GEODataError()
+
+
+def collect_idats_of_platform(
+    platform,
+    limit: int | None = None,
+    conn: psycopg.Connection | None = None,
+    dry_run: bool = False,
+):
+    if not dry_run and conn is None:
+        raise RuntimeError('DB connection must be provided when not dry-run.')
+
     geo_info = geo_exact_lookup(platform)
 
     all_series = geo_info['series_id']
@@ -224,45 +266,90 @@ def collect_idats_of_platform(platform):
     logger.debug(f'Series count = {len(all_series)}')
     logger.debug(f'Sample count = {len(all_samples)}')
 
-    # tmp for dev
-    max_fetch = 10
-    cnt_fetch = 0
+    assert_list_str(all_samples)
 
-    for sample_id in all_samples[100000:]:
-
-        # tmp for dev
-        if cnt_fetch >= max_fetch:
-            return
+    cnt = 0
+    for sample_id in all_samples:
+        if limit is not None and cnt >= limit:
+            break
 
         sample = geo_exact_lookup(sample_id)
 
-        if sample['supplementary_file'] == 'NONE':
+        supp = sample.get('supplementary_file', 'NONE')
+        if supp == 'NONE':
             logger.debug(f'Sample has no supplementary files {sample_id=}')
             continue
 
-        for fpath in sample['supplementary_file']:
-            fpath = 'https' + fpath[3:]
-            # TODO: Stream to S3
-            streamed_download(fpath, Path(fpath).name)
+        assert_list_str(supp)
 
-        # TODO: Construct and insert sample detail
+        idat_files = [f for f in supp if '.idat' in f.lower()]
+        if not idat_files:
+            logger.debug(f'No IDAT files for {sample_id=}')
+            continue
 
-        cnt_fetch += 1
-        pprint(sample)
-        logger.info(f'Sample idats fetched {sample_id=}')
+        meta = extract_sample_metadata(sample)
+
+        # Dry-run short circuit and log
+        if dry_run:
+            logger.info(f'[dry-run] Would insert sample {sample_id} meta={meta}')
+            for fpath in idat_files:
+                logger.info(f'[dry-run] Would upload {fpath}')
+            cnt += 1
+            continue
+
+        assert conn is not None
+
+        # Insert sample and idat to DB and Storage
+        db_sample_id = db.upsert_sample(
+            conn,
+            repository_id='geo',
+            repository_sample_id=sample_id,
+            **meta,
+        )
+
+        for fpath in idat_files:
+
+            # Replace ftp:// with https://
+            # We are using HTTP to fetch the files instead of FTP because their FTP
+            # server doesn't seem to work
+            fpath = 'https' + fpath[3:] if fpath.startswith('ftp') else fpath
+            filename = Path(fpath).name
+            s3_key = f'geo/{sample_id}/{filename}'
+
+            idat_id = db.insert_idat_file(
+                conn,
+                sample_id=db_sample_id,
+                source_url=fpath,
+                channel=get_idat_channel(filename),
+            )
+
+            # Download file to tmp local storage, then upload to S3
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = Path(tmpdir) / filename
+                streamed_download(fpath, str(local_path))
+                storage.upload_file(local_path, s3_key)
+
+                # TODO perhaps we should also process the idat file(s) rightaway, and S3
+                # serves more as a short term mirror such that we can have easy access
+                # to the file if inspections are needed? (like 30 retention)
+
+            db.mark_idat_uploaded(conn, idat_id, s3_key)
+            logger.info(f'Uploaded {s3_key}')
+
+        cnt += 1
+        logger.info(f'Sample processed {sample_id=}')
 
 
-def collect_idats():
+def collect_idats(limit: int | None = None, dry_run: bool = False):
     for plat in platforms:
-        collect_idats_of_platform(plat)
+        collect_idats_of_platform(plat, limit=limit, dry_run=dry_run)
 
 
 # Use module main as integration test
 if __name__ == "__main__":
-    from pprint import pprint
     from miqa.utils import setup_logging
 
     setup_logging()
     logger.setLevel(logging.DEBUG)
 
-    collect_idats_of_platform(platforms[0])
+    collect_idats_of_platform(platforms[0], limit=3, dry_run=True)
