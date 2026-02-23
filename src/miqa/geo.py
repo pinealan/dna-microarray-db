@@ -433,9 +433,6 @@ def crawl_and_process(
             except Exception as e:
                 logger.error(e, f'Failed to save {sample_id}')
 
-        if cnt > 10:
-            break
-
 
 def save_sample(
     sample_id: str,
