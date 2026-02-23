@@ -2,10 +2,10 @@
 Database helpers — raw SQL via psycopg3, no ORM.
 """
 
+import json
 from typing import Any
 
 import psycopg
-
 
 
 class DBError(Exception):
@@ -30,7 +30,6 @@ def upsert_sample(
     Insert a sample row, ignoring conflicts on (repository_id, repository_sample_id).
     Returns the sample id (new or existing).
     """
-    import json
 
     with conn.cursor() as cur:
         cur.execute(
@@ -64,7 +63,7 @@ def upsert_sample(
 
         # Row already existed — fetch its id
         cur.execute(
-            "SELECT id FROM sample WHERE repository_id = %s AND repository_sample_id = %s",
+            'SELECT id FROM sample WHERE repository_id = %s AND repository_sample_id = %s',
             (repository_id, repository_sample_id),
         )
         row = cur.fetchone()
@@ -98,7 +97,7 @@ def insert_idat_file(
 def mark_idat_uploaded(conn: psycopg.Connection, idat_id: int, s3_key: str) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE idat_file SET s3_key = %s, uploaded_at = now() WHERE id = %s",
+            'UPDATE idat_file SET s3_key = %s, uploaded_at = now() WHERE id = %s',
             (s3_key, idat_id),
         )
 
@@ -106,7 +105,7 @@ def mark_idat_uploaded(conn: psycopg.Connection, idat_id: int, s3_key: str) -> N
 def mark_idat_processed(conn: psycopg.Connection, idat_id: int) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE idat_file SET processed_at = now() WHERE id = %s",
+            'UPDATE idat_file SET processed_at = now() WHERE id = %s',
             (idat_id,),
         )
 
@@ -114,6 +113,6 @@ def mark_idat_processed(conn: psycopg.Connection, idat_id: int) -> None:
 def mark_idat_deleted(conn: psycopg.Connection, idat_id: int) -> None:
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE idat_file SET deleted_at = now() WHERE id = %s",
+            'UPDATE idat_file SET deleted_at = now() WHERE id = %s',
             (idat_id,),
         )

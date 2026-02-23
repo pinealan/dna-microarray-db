@@ -12,11 +12,11 @@ from miqa import config
 
 def _client():
     return boto3.client(
-        "s3",
+        's3',
         endpoint_url=config.S3_ENDPOINT_URL,
         aws_access_key_id=config.S3_KEY,
         aws_secret_access_key=config.S3_SECRET,
-        config=Config(signature_version="s3v4"),
+        config=Config(signature_version='s3v4'),
     )
 
 

@@ -33,26 +33,29 @@ from miqa import db, storage
 from miqa.utils import assert_list_str, streamed_download
 
 
-E_UTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-GEO_ACCN_BASE = "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi"
-GEO_FTP_BASE = "https://ftp.ncbi.nlm.nih.gov/geo"
+E_UTILS_BASE = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'
+GEO_ACCN_BASE = 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi'
+GEO_FTP_BASE = 'https://ftp.ncbi.nlm.nih.gov/geo'
 
 logger = logging.getLogger(__name__)
 
 
 class GEOError(Exception):
     """GEO related exceptions."""
+
     pass
 
 
 class GEODataError(GEOError):
     """Found invalid GEO data during parsing."""
+
     pass
 
 
 # --------------------
 # GEO Accession Display endpoint fetcher
 # --------------------
+
 
 def geo_lookup(accession_id: str, extra_params={}) -> list[dict]:
     """
@@ -62,12 +65,7 @@ def geo_lookup(accession_id: str, extra_params={}) -> list[dict]:
     for details of the query parameters.
     """
     url = GEO_ACCN_BASE
-    params = {
-        "acc": accession_id,
-        "targ": "self",
-        "view": "brief",
-        "form": "text"
-    } | extra_params
+    params = {'acc': accession_id, 'targ': 'self', 'view': 'brief', 'form': 'text'} | extra_params
     res = httpx.get(url, params=params)
     return parse_soft_lines(res.iter_lines())
 
@@ -85,6 +83,7 @@ class SoftParser:
 
     Does not support parsing data tables.
     """
+
     def __init__(self):
         self.parsed = []
         self.current = {}
@@ -139,6 +138,7 @@ def parse_soft_lines(lines: Iterable[str]) -> list[dict]:
 # Entrez API crawler
 # --------------------
 
+
 def e_search(**extra_params):
     """
     Query the Entrez eSearch program.
@@ -147,23 +147,23 @@ def e_search(**extra_params):
     - https://www.ncbi.nlm.nih.gov/geo/info/qqtutorial.html
     - https://www.ncbi.nlm.nih.gov/geo/info/geo_paccess.html
     """
-    url = E_UTILS_BASE + "/esearch.fcgi"
+    url = E_UTILS_BASE + '/esearch.fcgi'
     params = {
-        "db": "gds",
-        "retMax": 10000,
-        "retmode": "json",
+        'db': 'gds',
+        'retMax': 10000,
+        'retmode': 'json',
     } | extra_params
     res = httpx.get(url, params=params)
 
     # Check if the request was successful
     if res.status_code != 200:
-        raise GEOError(f"Request failed with status code: {res.status_code}")
+        raise GEOError(f'Request failed with status code: {res.status_code}')
 
     data = res.json()
 
     # Access specific elements (example)
     if 'esearchresult' not in data:
-        raise GEODataError(f"Data seems malformed. {data}")
+        raise GEODataError(f'Data seems malformed. {data}')
 
     return data['esearchresult']
 
@@ -179,18 +179,16 @@ def e_search_all(**extra_params):
 
 
 def e_summary(id: int | str) -> dict:
-    url = E_UTILS_BASE + "/esummary.fcgi"
+    url = E_UTILS_BASE + '/esummary.fcgi'
     params = {
-        "db": "gds",
-        "id": id,
-        "retmode": "json",
+        'db': 'gds',
+        'id': id,
+        'retmode': 'json',
     }
     res = httpx.get(url, params=params)
 
     if res.status_code != 200:
-        raise RuntimeError(
-            f"Request for summary failed with status: {res.status_code}"
-        )
+        raise RuntimeError(f'Request for summary failed with status: {res.status_code}')
 
     return res.json()
 
@@ -199,6 +197,7 @@ def e_summary(id: int | str) -> dict:
 # GEO FTP fetcher
 # (unused as of now)
 # --------------------
+
 
 @dataclass
 class SampleSuppFile:
@@ -212,9 +211,7 @@ def geo_ftp_series(accession_id) -> httpx.Response:
     res = httpx.get(url)
 
     if res.status_code != 200:
-        raise RuntimeError(
-            f"Request for sampling listing failed with status: {res.status_code}"
-        )
+        raise RuntimeError(f'Request for sampling listing failed with status: {res.status_code}')
 
     return res
 
@@ -224,14 +221,13 @@ def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
     res = httpx.get(url)
 
     if res.status_code != 200:
-        raise RuntimeError(
-            f"Request for sampling listing failed with status: {res.status_code}"
-        )
+        raise RuntimeError(f'Request for sampling listing failed with status: {res.status_code}')
 
     anchors = BeautifulSoup(res.text, 'html.parser').select('pre a')
     return [
         SampleSuppFile(accession_id, href, url + href)
-        for a in anchors if (href := cast(str, a.get('href'))).endswith('.gz')
+        for a in anchors
+        if (href := cast(str, a.get('href'))).endswith('.gz')
     ]
 
 
@@ -296,7 +292,7 @@ def parse_characteristic(line: str) -> tuple[str, str] | None:
     for pattern, field in _CHAR_PATTERNS:
         m = re.match(pattern, line, re.IGNORECASE)
         if m:
-            extracted = line[m.end():].strip()
+            extracted = line[m.end() :].strip()
             return field, extracted
     return None
 
@@ -344,11 +340,15 @@ def enrich_sample(sample: dict) -> dict[str, Any]:
     if gender_raw:
         structured['gender'] = _GENDER_MAP.get(gender_raw.lower().strip())
 
-
     # Everything else goes to extras
     skip_keys = {
-        'entity_type', 'entity_id', 'series_id', 'platform_id',
-        'characteristics_ch1', 'extract_protocol_ch1', 'supplementary_file',
+        'entity_type',
+        'entity_id',
+        'series_id',
+        'platform_id',
+        'characteristics_ch1',
+        'extract_protocol_ch1',
+        'supplementary_file',
     }
     for k, v in sample.items():
         if k not in skip_keys and k not in structured:
@@ -378,11 +378,9 @@ def enrich_sample(sample: dict) -> dict[str, Any]:
 platforms = ['GPL13534', 'GPL21145', 'GPL16304']
 
 
-series_with_idat_search_term = ' AND '.join([
-    'idat[suppFile]',
-    'gse[Entry Type]',
-    f'({' OR '.join([p + '[accn]' for p in platforms])})'
-])
+series_with_idat_search_term = ' AND '.join(
+    ['idat[suppFile]', 'gse[Entry Type]', f'({" OR ".join([p + "[accn]" for p in platforms])})']
+)
 
 
 def crawl_and_process(
@@ -400,16 +398,14 @@ def crawl_and_process(
     # TODO: eSummary supports fetching more than 1 ID at a time. We can save lots of
     # network calls if we do a batched query.
     for eid in entrez_ids:
-
         # Look into entrez's record for corresponding GEO accession ID
         series_id = e_summary(eid)['result'][eid]['accession']
         series = geo_exact_lookup(series_id)
 
         # TODO: Extract metadata from series, so we can pass it on later to samples
-        #series_enriched = enrich_series(series)
+        # series_enriched = enrich_series(series)
 
         for sample_id in series['sample_id']:
-
             # Process a single sample
             sample = geo_exact_lookup(sample_id)
             if (idat_files := find_idat_files(sample)) is None:
@@ -426,11 +422,13 @@ def crawl_and_process(
             assert conn is not None
 
             # Save sample to database
-            if (
-                db_id := save_sample(sample_id, sample_enriched, idat_files, conn)
-            ) is not None:
+            if (db_id := save_sample(sample_id, sample_enriched, idat_files, conn)) is not None:
                 cnt += 1
                 logger.info(f'{cnt=} {sample_id=} inserted as {db_id=}')
+            else:
+                logger.warning(f'Could not insert {sample_id} into DB')
+        if cnt > 10:
+            break
 
 
 def save_sample(
@@ -450,7 +448,6 @@ def save_sample(
 
     # Insert each idat as DB record and download to storage
     for fpath in idat_files:
-
         # Replace ftp:// with https://
         # We are using HTTP to fetch the files instead of FTP because their FTP
         # server doesn't seem to work
@@ -491,7 +488,7 @@ def get_idat_channel(filename: str) -> str:
 
 
 # Use module main as integration test
-if __name__ == "__main__":
+if __name__ == '__main__':
     from pprint import pprint
     from miqa.utils import setup_logging
 

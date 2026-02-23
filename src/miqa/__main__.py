@@ -23,7 +23,7 @@ from miqa.utils import setup_logging
 from miqa import config
 
 
-app = typer.Typer(help="DNA methylation sample database crawler")
+app = typer.Typer(help='DNA methylation sample database crawler')
 
 
 def _setup():
@@ -31,9 +31,9 @@ def _setup():
     logging.getLogger().setLevel(config.LOG_LEVEL)
 
 
-@app.command(name="geo")
+@app.command(name='geo')
 def geo_cmd(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
+    dry_run: bool = typer.Option(False, '--dry-run', help='Print actions without writing'),
 ):
     """Crawl GEO for methylation IDAT files."""
     conn = None if dry_run else psycopg.connect(config.DATABASE_URL, autocommit=True)
@@ -42,8 +42,8 @@ def geo_cmd(
 
 @app.command()
 def arrayexpress(
-    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Max samples to process"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
+    limit: Optional[int] = typer.Option(None, '--limit', '-n', help='Max samples to process'),
+    dry_run: bool = typer.Option(False, '--dry-run', help='Print actions without writing'),
 ):
     """Crawl ArrayExpress for methylation IDAT files."""
     ae.collect_idats(limit=limit, dry_run=dry_run)
@@ -51,8 +51,8 @@ def arrayexpress(
 
 @app.command()
 def all(
-    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Max samples to process"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
+    limit: Optional[int] = typer.Option(None, '--limit', '-n', help='Max samples to process'),
+    dry_run: bool = typer.Option(False, '--dry-run', help='Print actions without writing'),
 ):
     """Crawl both GEO and ArrayExpress."""
     conn = None if dry_run else psycopg.connect(config.DATABASE_URL, autocommit=True)
@@ -60,6 +60,6 @@ def all(
     ae.collect_idats(limit=limit, dry_run=dry_run)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     _setup()
     app()

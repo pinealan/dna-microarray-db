@@ -9,12 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
 
-S3_ENDPOINT_URL = os.environ.get("S3_ENDPOINT_URL", "")
-S3_BUCKET = os.environ.get("S3_BUCKET", "")
-S3_KEY = os.environ.get("S3_KEY", "")
-S3_SECRET = os.environ.get("S3_SECRET", "")
+S3_ENDPOINT_URL = os.environ.get('S3_ENDPOINT_URL', '')
+S3_BUCKET = os.environ.get('S3_BUCKET', '')
+S3_KEY = os.environ.get('S3_KEY', '')
+S3_SECRET = os.environ.get('S3_SECRET', '')
 
-_log_level_str = os.environ.get("LOG_LEVEL", "INFO").upper()
+_log_level_str = os.environ.get('LOG_LEVEL', 'INFO').upper()
 LOG_LEVEL: int = getattr(logging, _log_level_str, logging.INFO)
