@@ -2,7 +2,6 @@
 Central configuration — reads all environment variables from .env or the environment.
 """
 
-import logging
 import os
 
 from dotenv import load_dotenv
