@@ -11,7 +11,6 @@ Options:
     --dry-run      Print what would be done without writing to DB or S3
 """
 
-import logging
 from typing import Optional
 
 import psycopg
@@ -35,7 +34,7 @@ def geo_cmd(
     dry_run: bool = typer.Option(False, '--dry-run', help='Print actions without writing'),
 ):
     """Crawl GEO for methylation IDAT files."""
-    conn = None if dry_run else psycopg.connect(config.DATABASE_URL, autocommit=True)
+    conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
     geo.crawl_and_process(conn, dry_run=dry_run)
 
 
@@ -45,7 +44,7 @@ def arrayexpress(
     dry_run: bool = typer.Option(False, '--dry-run', help='Print actions without writing'),
 ):
     """Crawl ArrayExpress for methylation IDAT files."""
-    ae.collect_idats(limit=limit, dry_run=dry_run)
+    # ae.collect_idats(limit=limit, dry_run=dry_run)
 
 
 @app.command()
@@ -54,9 +53,9 @@ def all(
     dry_run: bool = typer.Option(False, '--dry-run', help='Print actions without writing'),
 ):
     """Crawl both GEO and ArrayExpress."""
-    conn = None if dry_run else psycopg.connect(config.DATABASE_URL, autocommit=True)
+    conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
     geo.crawl_and_process(conn, dry_run=dry_run)
-    ae.collect_idats(limit=limit, dry_run=dry_run)
+    # ae.collect_idats(limit=limit, dry_run=dry_run)
 
 
 if __name__ == '__main__':
