@@ -313,7 +313,7 @@ def enrich_sample(sample: dict) -> dict[str, Any]:
     series_id = sample.get('series_id')
     if isinstance(series_id, list):
         series_id = series_id[0]
-    structured['series_id'] = series_id
+    structured['repository_series_id'] = series_id
 
     # Platform
     structured['platform_id'] = sample.get('platform_id')
