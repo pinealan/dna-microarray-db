@@ -36,7 +36,7 @@ def geo_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
 ):
     """Crawl GEO for methylation IDAT files."""
-    conn = None if dry_run else psycopg.connect(config.DATABASE_URL)
+    conn = None if dry_run else psycopg.connect(config.DATABASE_URL, autocommit=True)
     geo.crawl_and_process(conn, dry_run=dry_run)
 
 
@@ -55,7 +55,7 @@ def all(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
 ):
     """Crawl both GEO and ArrayExpress."""
-    conn = None if dry_run else psycopg.connect(config.DATABASE_URL)
+    conn = None if dry_run else psycopg.connect(config.DATABASE_URL, autocommit=True)
     geo.crawl_and_process(conn, dry_run=dry_run)
     ae.collect_idats(limit=limit, dry_run=dry_run)
 
