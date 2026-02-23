@@ -11,10 +11,10 @@ Options:
     --dry-run      Print what would be done without writing to DB or S3
 """
 
-from __future__ import annotations
-
+import logging
 from typing import Optional
 
+import psycopg
 import typer
 
 import miqa.geo as geo
@@ -28,7 +28,6 @@ app = typer.Typer(help="DNA methylation sample database crawler")
 
 def _setup():
     setup_logging()
-    import logging
     logging.getLogger().setLevel(config.LOG_LEVEL)
 
 
@@ -37,8 +36,8 @@ def geo_cmd(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
 ):
     """Crawl GEO for methylation IDAT files."""
-    _setup()
-    geo.crawl_and_process(conn=None, dry_run=dry_run)
+    conn = None if dry_run else psycopg.connect(config.DATABASE_URL)
+    geo.crawl_and_process(conn, dry_run=dry_run)
 
 
 @app.command()
@@ -47,7 +46,6 @@ def arrayexpress(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
 ):
     """Crawl ArrayExpress for methylation IDAT files."""
-    _setup()
     ae.collect_idats(limit=limit, dry_run=dry_run)
 
 
@@ -57,10 +55,11 @@ def all(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print actions without writing"),
 ):
     """Crawl both GEO and ArrayExpress."""
-    _setup()
-    geo.crawl_and_process(conn=None, dry_run=dry_run)
+    conn = None if dry_run else psycopg.connect(config.DATABASE_URL)
+    geo.crawl_and_process(conn, dry_run=dry_run)
     ae.collect_idats(limit=limit, dry_run=dry_run)
 
 
 if __name__ == "__main__":
+    _setup()
     app()
