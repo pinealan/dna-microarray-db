@@ -23,6 +23,12 @@ dependencies = [
     "xmltodict>=1.0.2",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.15.2",
+]
+
 [build-system]
 requires = ["setuptools"]
 requires-python = "==3.13.*"
@@ -36,7 +42,11 @@ venvPath = "."
 venv = ".venv"
 include = ["src", "."]
 
-[dependency-groups]
-dev = [
-    "pytest>=9.0.2",
-]
+[tool.ruff]
+line-length = 99
+
+[tool.ruff.lint]
+# Add the `line-too-long` rule to the enforced rule set. By default, Ruff omits rules that
+# overlap with the use of a formatter, like Black, but we can override this behavior by
+# explicitly adding the rule.
+extend-select = ["E501"]

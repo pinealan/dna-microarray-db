@@ -6,7 +6,6 @@ from typing import Any
 
 import psycopg
 
-from miqa import config
 
 
 class DBError(Exception):

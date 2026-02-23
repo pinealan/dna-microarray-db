@@ -1,7 +1,6 @@
-from pprint import pprint
 import pytest
 
-from miqa.geo import *
+from miqa.geo import geo_exact_lookup, enrich_sample
 
 
 @pytest.fixture(scope='session')
