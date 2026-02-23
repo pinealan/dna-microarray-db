@@ -101,11 +101,10 @@ class SoftParser:
 
         # Continuation of attributes for current entity
         elif first_char == '!':
-            split_res = line[1:].strip().split(' = ')
-            if len(split_res) < 2:
+            attr, _, val = line[1:].strip().partition(' = ')
+            if val.strip() == '':
                 return
 
-            attr, val = split_res
             attr_prefix_len = len(self.current['entity_type']) + 1
             attr = attr[attr_prefix_len:]
             if attr in self.current:
