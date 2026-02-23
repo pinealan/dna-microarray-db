@@ -384,16 +384,16 @@ series_with_idat_search_term = ' AND '.join(
 
 
 def crawl_and_process(
-    conn: psycopg.Connection | None = None,
+    conn: psycopg.Connection,
     dry_run: bool = False,
 ):
     if not dry_run and conn is None:
         raise RuntimeError('DB connection must be provided when not dry-run.')
 
+    # TODO: Lots of parallelisation possible in this workflow
+
     entrez_ids = e_search_all(term=series_with_idat_search_term)
     cnt = 0
-
-    # TODO: Check against database to avoid retreading processed series/samples
 
     # TODO: eSummary supports fetching more than 1 ID at a time. We can save lots of
     # network calls if we do a batched query.
@@ -406,6 +406,13 @@ def crawl_and_process(
         # series_enriched = enrich_series(series)
 
         for sample_id in series['sample_id']:
+
+            # TODO: Re-retrieve sample after a certain period of time has passed since
+            # it was last inspected/processed so we get a change to see updates
+            if db.seen_sample(conn, 'geo', sample_id):
+                logger.debug('Seen sample')
+                continue
+
             # Process a single sample
             sample = geo_exact_lookup(sample_id)
             if (idat_files := find_idat_files(sample)) is None:

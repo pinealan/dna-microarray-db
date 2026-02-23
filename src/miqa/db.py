@@ -12,6 +12,27 @@ class DBError(Exception):
     pass
 
 
+def seen_sample(
+    conn: psycopg.Connection,
+    repository_id: str,
+    repository_sample_id: str,
+) -> bool:
+    with conn.cursor() as cur:
+        return (
+            cur.execute(
+                """
+                SELECT 1 FROM sample
+                WHERE repository_id = %s AND repository_sample_id = %s
+                """,
+                (
+                    repository_id,
+                    repository_sample_id,
+                ),
+            ).fetchone()
+            is not None
+        )
+
+
 def upsert_sample(
     conn: psycopg.Connection,
     *,
@@ -29,6 +50,8 @@ def upsert_sample(
     """
     Insert a sample row, ignoring conflicts on (repository_id, repository_sample_id).
     Returns the sample id (new or existing).
+
+    TODO: Indicate the difference between inserted sample and an upsert?
     """
 
     with conn.cursor() as cur:
