@@ -1,4 +1,6 @@
 import logging
+import sys
+
 import httpx
 
 
@@ -10,11 +12,15 @@ def streamed_download(url: str, filename: str) -> None:
 
 
 def setup_logging():
+    """
+    Default to WARNING log level for third party libraries. Use DEBUG for our own code.
+    """
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.WARNING,
         format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+        stream=sys.stdout,
     )
-    logging.getLogger('httpcore').setLevel(logging.INFO)
+    logging.getLogger('miqa').setLevel(logging.DEBUG)
 
 
 def assert_non_empty_list_str(v):

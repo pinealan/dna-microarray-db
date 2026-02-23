@@ -240,7 +240,7 @@ def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
 # --------------------
 
 
-def enrich_series():
+def enrich_series(series: dict):
     """TODO"""
     return
 
@@ -397,15 +397,16 @@ def crawl_and_process(
 
     # TODO: Check against database to avoid retreading processed series/samples
 
+    # TODO: eSummary supports fetching more than 1 ID at a time. We can save lots of
+    # network calls if we do a batched query.
     for eid in entrez_ids:
 
         # Look into entrez's record for corresponding GEO accession ID
-        # TODO: eSummary supports fetching more than 1 ID at a time. We can save some
-        # network calls if we do it that way.
         series_id = e_summary(eid)['result'][eid]['accession']
         series = geo_exact_lookup(series_id)
 
         # TODO: Extract metadata from series, so we can pass it on later to samples
+        #series_enriched = enrich_series(series)
 
         for sample_id in series['sample_id']:
 
@@ -417,9 +418,10 @@ def crawl_and_process(
 
             # Dryrun short circuit and log
             if dry_run:
-                logger.info(f'[dry-run] Would insert sample {sample_id} {sample_enriched=}')
+                cnt += 1
+                logger.info(f'(dry-run) {cnt=} Would insert sample {sample_id} {sample_enriched=}')
                 for fpath in idat_files:
-                    logger.info(f'[dry-run] Would upload {fpath}')
+                    logger.info(f'(dry-run) Would upload {fpath}')
                 continue
             assert conn is not None
 
@@ -428,7 +430,7 @@ def crawl_and_process(
                 db_id := save_sample(sample_id, sample_enriched, idat_files, conn)
             ) is not None:
                 cnt += 1
-                logger.info(f'{sample_id=} inserted as {db_id=}')
+                logger.info(f'{cnt=} {sample_id=} inserted as {db_id=}')
 
 
 def save_sample(
@@ -494,7 +496,6 @@ if __name__ == "__main__":
     from miqa.utils import setup_logging
 
     setup_logging()
-    logger.setLevel(logging.DEBUG)
 
     # Search Entrez records
     res_esearch = e_search(
