@@ -422,11 +422,17 @@ def crawl_and_process(
             assert conn is not None
 
             # Save sample to database
-            if (db_id := save_sample(sample_id, sample_enriched, idat_files, conn)) is not None:
-                cnt += 1
-                logger.info(f'{cnt=} {sample_id=} inserted as {db_id=}')
-            else:
-                logger.warning(f'Could not insert {sample_id} into DB')
+            try:
+                if (
+                    db_id := save_sample(sample_id, sample_enriched, idat_files, conn)
+                ) is not None:
+                    cnt += 1
+                    logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
+                else:
+                    logger.warning(f'Could not insert {sample_id} into DB')
+            except Exception as e:
+                logger.error(e, f'Failed to save {sample_id}')
+
         if cnt > 10:
             break
 
