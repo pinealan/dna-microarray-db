@@ -28,7 +28,6 @@ app = typer.Typer(help='DNA methylation sample database crawler')
 
 def _setup():
     setup_logging()
-    logging.getLogger().setLevel(config.LOG_LEVEL)
 
 
 @app.command(name='geo')
