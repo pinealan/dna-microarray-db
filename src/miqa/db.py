@@ -7,8 +7,10 @@ from typing import Any
 
 import psycopg
 
+from miqa.error import MiqaError
 
-class DBError(Exception):
+
+class DBError(MiqaError):
     pass
 
 

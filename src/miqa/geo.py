@@ -30,7 +30,8 @@ import psycopg
 from bs4 import BeautifulSoup
 
 from miqa import db, storage
-from miqa.utils import assert_list_str, streamed_download
+from miqa.utils import assert_list_str, guess_idat_channel, streamed_download
+from miqa.error import MiqaError
 
 
 E_UTILS_BASE = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'
@@ -40,13 +41,13 @@ GEO_FTP_BASE = 'https://ftp.ncbi.nlm.nih.gov/geo'
 logger = logging.getLogger(__name__)
 
 
-class GEOError(Exception):
+class GEOError(MiqaError):
     """GEO related exceptions."""
 
     pass
 
 
-class GEODataError(GEOError):
+class GEODataError(MiqaError):
     """Found invalid GEO data during parsing."""
 
     pass
@@ -405,7 +406,6 @@ def crawl_and_process(
         # series_enriched = enrich_series(series)
 
         for sample_id in series['sample_id']:
-
             # TODO: Re-retrieve sample after a certain period of time has passed since
             # it was last inspected/processed so we get a change to see updates
             if db.seen_sample(conn, 'geo', sample_id):
@@ -468,7 +468,7 @@ def save_sample(
             conn,
             sample_id=db_sample_id,
             source_url=fpath,
-            channel=get_idat_channel(filename),
+            channel=guess_idat_channel(filename),
         )
 
         # Download file to tmp local storage, then upload to S3
@@ -485,15 +485,6 @@ def save_sample(
         logger.info(f'Uploaded {s3_key}')
 
     return db_sample_id
-
-
-def get_idat_channel(filename: str) -> str:
-    if '_Grn' in filename:
-        return 'Grn'
-    elif '_Red' in filename:
-        return 'Red'
-    else:
-        raise GEODataError()
 
 
 # Use module main as integration test
