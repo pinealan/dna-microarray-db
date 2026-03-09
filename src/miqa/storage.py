@@ -22,7 +22,9 @@ def _client():
 
 def upload_file(local_path: str | Path, s3_key: str) -> str:
     """Upload a local file to S3. Returns the s3_key on success."""
-    _client().upload_file(str(local_path), config.S3_BUCKET, s3_key)
+    _client().upload_file(
+        str(local_path), config.S3_BUCKET, s3_key, ExtraArgs={'ACL':'public-read'}
+    )
     return s3_key
 
 
