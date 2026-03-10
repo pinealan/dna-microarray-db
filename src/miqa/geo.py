@@ -93,7 +93,8 @@ async def fetch_samples_async(
     sample_ids: list[str],
     concurrency: int = 5,
 ) -> list[tuple[str, dict | Exception]]:
-    """Fetch multiple GEO sample records in parallel.
+    """
+    Fetch multiple GEO sample records in parallel.
 
     Returns a list of (sample_id, result) pairs where result is either a parsed
     sample dict or an Exception if the request failed.
@@ -305,6 +306,11 @@ _GENDER_MAP = {
 }
 
 
+# --------------------
+# Database and storage helpers
+# --------------------
+
+
 def upsert_sample(sample, series, conn):
     with conn.cursor() as cur:
         cur.execute(
@@ -336,74 +342,9 @@ def upsert_sample(sample, series, conn):
         raise db.DBError('Could not upsert row')
 
 
-# --------------------
-# GEO crawler entrypoint
-# --------------------
-
-
-def crawl_and_process(
-    conn: psycopg.Connection,
-    dry_run: bool = False,
-):
-    if not dry_run and conn is None:
-        raise RuntimeError('DB connection must be provided when not dry-run.')
-
-    # TODO: Lots of parallelisation possible in this workflow
-    cnt = 0
-
-    # TODO: eSummary supports fetching more than 1 ID at a time. We can save lots of
-    # network calls if we do a batched query.
-    for series_id in geo_series_id_iter():
-        series = geo_exact_lookup(series_id)
-
-        for sample_id in series['sample_id']:
-            # TODO: Re-retrieve sample after a certain period of time has passed since
-            # it was last inspected/processed so we get a change to see updates
-            if db.seen_sample(conn, 'geo', sample_id):
-                logger.debug('Seen sample')
-                continue
-
-            # Process a single sample
-            sample = geo_exact_lookup(sample_id)
-            if (idat_files := find_idat_files(sample)) is None:
-                continue
-
-            # Dryrun short circuit and log
-            if dry_run:
-                cnt += 1
-                logger.info(f'(dry-run) {cnt=} Would insert sample {sample_id} {sample=}')
-                for fpath in idat_files:
-                    logger.info(f'(dry-run) Would upload {fpath}')
-                continue
-            assert conn is not None
-
-            # Save sample to database
-            try:
-                if (
-                    db_id := save_sample_and_idat(sample_id, sample, idat_files, conn)
-                ) is not None:
-                    cnt += 1
-                    logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
-                else:
-                    logger.warning(f'Could not insert {sample_id} into DB')
-            except Exception as e:
-                logger.error(e, f'Failed to save {sample_id}')
-
-
-def save_sample_and_idat(
-    sample_id: str,
-    sample_enriched: dict,
-    idat_files: list[str],
-    conn: psycopg.Connection,
-) -> int | None:
-
-    # Insert sample as DB record
-    db_sample_id = db.upsert_sample(
-        conn,
-        repository_id='geo',
-        repository_sample_id=sample_id,
-        **sample_enriched,
-    )
+def download_idats(sample: dict, sample_db_id: int, conn: psycopg.Connection) -> bool:
+    if (idat_files := find_idat_files(sample)) is None:
+        return False
 
     # Insert each idat as DB record and download to storage
     for fpath in idat_files:
@@ -412,11 +353,11 @@ def save_sample_and_idat(
         # server doesn't seem to work
         fpath = 'https' + fpath[3:] if fpath.startswith('ftp') else fpath
         filename = Path(fpath).name
-        s3_key = f'geo/{sample_id}/{filename}'
+        s3_key = f'geo/{sample["entity_id"]}/{filename}'
 
         idat_id = db.insert_idat_file(
             conn,
-            sample_id=db_sample_id,
+            sample_id=sample_db_id,
             source_url=fpath,
             channel=guess_idat_channel(filename),
         )
@@ -433,8 +374,12 @@ def save_sample_and_idat(
 
         db.mark_idat_uploaded(conn, idat_id, s3_key)
         logger.info(f'Uploaded {s3_key}')
+    return True
 
-    return db_sample_id
+
+# --------------------
+# CLI commands
+# --------------------
 
 
 app = typer.Typer(help='GEO crawler')
@@ -447,63 +392,18 @@ def import_one(series_id: str):
     conn = psycopg.connect(cfg.DATABASE_URL, autocommit=True)
     series = geo_exact_lookup(series_id)
 
-    # TODO: Extract metadata from series, so we can pass it on later to samples
-    # series_enriched = enrich_series(series)
-
     for sample_id in series['sample_id']:
-        # TODO: Re-retrieve sample after a certain period of time has passed since
-        # it was last inspected/processed so we get a change to see updates
         if db.seen_sample(conn, 'geo', sample_id):
             logger.debug('Seen sample')
             continue
 
-        # Process a single sample
         sample = geo_exact_lookup(sample_id)
-        if (idat_files := find_idat_files(sample)) is None:
-            continue
         db_id = upsert_sample(sample, series, conn)
         logger.info(f'{sample_id} inserted as {db_id=}')
-
-
-@app.command()
-def load_and_dump():
-    import json
-    from pprint import pprint
-
-    # Search Entrez records
-    res_esearch = e_search(
-        term=series_with_idat_search_term,
-        retMax=10,
-    )
-    pprint(res_esearch)
-
-    # Get Entrez record
-    eid = res_esearch['idlist'][0]
-    res_esum = e_summary(eid)
-    pprint(res_esum)
-
-    # Get GEO record of Series
-    # series_accn = res_esum['result'][eid]['accession']
-    series_accn = 'GSE318173'
-    res_series = geo_exact_lookup(series_accn)
-    json.dump(res_series, open(series_accn + '.json', 'w'))
-
-    # Get GEO record of Sample
-    sample_accn = res_series['sample_id'][0]
-    res_sample = geo_exact_lookup(sample_accn)
-    json.dump(res_sample, open(sample_accn + '.json', 'w'))
-
-
-@app.command()
-def show_enrich(series_accn: str = 'GSE318173'):
-    import json
-
-    res_series = json.load(open(series_accn + '.json'))
-    sample_accn = res_series['sample_id'][0]
-    res_sample = json.load(open(sample_accn + '.json'))
-
-    # TODO: Use rules from miqa.normalise
-    # print(json.dumps(enrich_sample(res_sample)))
+        if download_idats(sample, db_id, conn):
+            logger.info(f'Downloaded {sample_id=} idat files')
+        else:
+            logger.info(f'Failed to download {sample_id=} idat files')
 
 
 @app.command()
@@ -522,6 +422,7 @@ def show_raw(
 @app.command()
 def crawl(
     skip_seen: bool = True,
+    download_idat: bool = False,
     concurrency: int = 10,
 ):
     import miqa.config as config
@@ -552,6 +453,7 @@ def crawl(
             if isinstance(sample_or_exc, Exception):
                 logger.error(f'Failed to fetch {sample_id}: {sample_or_exc}')
                 continue
+
             try:
                 db_id = upsert_sample(sample_or_exc, series, conn)
                 logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
@@ -560,6 +462,13 @@ def crawl(
                 logger.error(f'Failed to insert sample {sample_id=} with uncatalogued attribute')
             except Exception:
                 logger.exception(f'Failed to insert {sample_id=}')
+            else:
+                # Optionally download idat files as well
+                if download_idat:
+                    if download_idats(sample_or_exc, db_id, conn):
+                        logger.info(f'Downloaded {sample_id=} idat files')
+                    else:
+                        logger.info(f'Failed to download {sample_id=} idat files')
 
 
 # Use module main as integration test or quick script
