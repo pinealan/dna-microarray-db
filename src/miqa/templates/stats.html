@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 style="margin-bottom:1.5rem;">Mapping Statistics</h1>
+<p style="color:#555;font-size:0.875rem;margin-top:-1rem;margin-bottom:1.5rem;">
+  {{ total_samples }} samples total &mdash; statistics reflect rule simulation (not current DB state).
+</p>
+
+{# ── 1. Coverage overview ─────────────────────────────────────────────────── #}
+<div class="stat-section panel" style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem;">
+  <h2>Coverage overview</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Attribute</th>
+        <th>Total</th>
+        <th>Has value</th>
+        <th>Would map</th>
+        <th>Unmapped</th>
+        <th>% of total</th>
+        <th style="min-width:140px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in coverage %}
+      <tr>
+        <td><strong>{{ row.attribute }}</strong></td>
+        <td>{{ row.total }}</td>
+        <td>{{ row.has_value }}</td>
+        <td>{% if row.mapped is not none %}{{ row.mapped }}{% else %}<span style="color:#999;">n/a</span>{% endif %}</td>
+        <td>{% if row.unmapped is not none %}{{ row.unmapped }}{% else %}<span style="color:#999;">n/a</span>{% endif %}</td>
+        <td>
+          {% if row.pct_covered is not none %}
+            {{ row.pct_covered }}%
+          {% else %}
+            <span style="color:#999;">n/a</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.pct_covered is not none %}
+            <div class="bar-wrap">
+              <div class="bar-fill" style="width:{{ row.pct_covered }}%;"></div>
+            </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── 2. Per-attribute canonical distributions + unmapped ──────────────────── #}
+{% for attr in ['tissue', 'disease', 'extraction_protocol'] %}
+{% set dist = distributions[attr] %}
+{% set unmapped = unmapped_values[attr] %}
+{% set max_count = (dist[0][1] if dist else 1) %}
+<div class="stat-section panel" style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem;">
+  <h2>{{ attr | capitalize }} distribution</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+
+    <div>
+      <p style="font-size:0.8rem;color:#555;margin:0 0 0.5rem;">Canonical values after rule mapping</p>
+      {% if dist %}
+      <table>
+        <thead><tr><th>Canonical value</th><th>Samples</th><th style="min-width:100px;"></th></tr></thead>
+        <tbody>
+          {% for val, cnt in dist %}
+          <tr>
+            <td>{{ val }}</td>
+            <td>{{ cnt }}</td>
+            <td>
+              <div class="bar-wrap">
+                <div class="bar-fill" style="width:{{ (cnt / max_count * 100) | round | int }}%;"></div>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p style="color:#999;font-size:0.875rem;">No rules defined for this attribute.</p>
+      {% endif %}
+    </div>
+
+    <div>
+      <p style="font-size:0.8rem;color:#555;margin:0 0 0.5rem;">
+        Top unmapped raw values
+        {% if unmapped %}<span style="color:#d93025;">({{ unmapped | length }} shown)</span>{% endif %}
+      </p>
+      {% if unmapped %}
+      {% set max_u = unmapped[0][1] %}
+      <table>
+        <thead><tr><th>Raw value</th><th>Samples</th><th style="min-width:100px;"></th></tr></thead>
+        <tbody>
+          {% for val, cnt in unmapped %}
+          <tr>
+            <td style="color:#555;">{{ val }}</td>
+            <td>{{ cnt }}</td>
+            <td>
+              <div class="bar-wrap">
+                <div class="bar-fill muted" style="width:{{ (cnt / max_u * 100) | round | int }}%;"></div>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p style="color:#4caf50;font-size:0.875rem;">All values are mapped.</p>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endfor %}
+
+{# ── 3. Gender distribution ───────────────────────────────────────────────── #}
+<div class="stat-section panel" style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem;">
+  <h2>Gender distribution</h2>
+  {% if gender_counts %}
+  {% set max_g = gender_counts.values() | max %}
+  <table style="max-width:400px;">
+    <thead><tr><th>Value</th><th>Samples</th><th style="min-width:120px;"></th></tr></thead>
+    <tbody>
+      {% for label, cnt in gender_counts.items() | sort(attribute='1', reverse=true) %}
+      <tr>
+        <td>{{ label }}</td>
+        <td>{{ cnt }}</td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar-fill {% if label == 'not_recorded' %}muted{% endif %}"
+                 style="width:{{ (cnt / max_g * 100) | round | int }}%;"></div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;font-size:0.875rem;">No gender data.</p>
+  {% endif %}
+</div>
+
+{# ── 4. Age histogram ─────────────────────────────────────────────────────── #}
+<div class="stat-section panel" style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem;">
+  <h2>Age distribution</h2>
+  {% if age_histogram %}
+  {% set max_a = age_histogram | map(attribute='count') | max %}
+  <table style="max-width:400px;">
+    <thead><tr><th>Age range</th><th>Samples</th><th style="min-width:120px;"></th></tr></thead>
+    <tbody>
+      {% for bucket in age_histogram %}
+      <tr>
+        <td>{{ bucket.label }}</td>
+        <td>{{ bucket.count }}</td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar-fill {% if bucket.label == 'non-numeric' %}muted{% endif %}"
+                 style="width:{{ (bucket.count / max_a * 100) | round | int }}%;"></div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;font-size:0.875rem;">No age data.</p>
+  {% endif %}
+</div>
+
+{# ── 5. Tissue × platform × repository breakdown ──────────────────────────── #}
+<div class="stat-section panel" style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem;">
+  <h2>Tissue × platform × repository</h2>
+  <p style="font-size:0.8rem;color:#555;margin:0 0 0.75rem;">
+    Platform matters for methylation studies: 450k and EPIC arrays cover different CpG sites.
+  </p>
+  {% if platform_breakdown %}
+  <table>
+    <thead>
+      <tr>
+        <th>Canonical tissue</th>
+        <th>Repository / Platform</th>
+        <th>Samples</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tissue, combos in platform_breakdown.items() %}
+        {% set total_for_tissue = combos.values() | sum %}
+        {% for label, cnt in combos.items() | sort(attribute='1', reverse=true) %}
+        <tr>
+          {% if loop.first %}
+          <td rowspan="{{ combos | length }}" style="vertical-align:top;border-right:1px solid #eee;">
+            <strong>{{ tissue }}</strong>
+            <div style="color:#999;font-size:0.75rem;">{{ total_for_tissue }} total</div>
+          </td>
+          {% endif %}
+          <td>{{ label }}</td>
+          <td>{{ cnt }}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;font-size:0.875rem;">No tissue data.</p>
+  {% endif %}
+</div>
+
+{# ── 6. Rule effectiveness ────────────────────────────────────────────────── #}
+<div class="stat-section panel" style="background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem;">
+  <h2>Rule effectiveness</h2>
+  {% if rule_effectiveness %}
+  {% set max_h = (rule_effectiveness | map(attribute='hits') | max) or 1 %}
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Source → Target</th>
+        <th>Pattern</th>
+        <th>Type</th>
+        <th>Value</th>
+        <th>Pri</th>
+        <th>Hits</th>
+        <th style="min-width:120px;"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in rule_effectiveness %}
+      {% set r = item.rule %}
+      <tr class="{% if item.hits == 0 %}dead-rule{% endif %}">
+        <td>{{ r.rule_id }}</td>
+        <td>{{ r.source_attribute }} → {{ r.target_attribute }}</td>
+        <td><code>{{ r.pattern }}</code></td>
+        <td>{{ r.rule_type }}</td>
+        <td>{{ r.attribute_value }}</td>
+        <td>{{ r.priority }}</td>
+        <td>
+          {{ item.hits }}
+          {% if item.hits == 0 %}<span title="This rule never matches any sample" style="color:#d93025;">⚠</span>{% endif %}
+        </td>
+        <td>
+          <div class="bar-wrap">
+            <div class="bar-fill {% if item.hits == 0 %}muted{% endif %}"
+                 style="width:{{ (item.hits / max_h * 100) | round | int }}%;"></div>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#999;font-size:0.875rem;">No rules defined yet.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

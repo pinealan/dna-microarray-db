@@ -86,9 +86,26 @@
 
     .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
     .htmx-request .htmx-indicator { opacity: 1; }
+
+    nav { margin-bottom: 1.25rem; font-size: 0.875rem; }
+    nav a { color: #1a73e8; text-decoration: none; margin-right: 1rem; }
+    nav a:hover { text-decoration: underline; }
+    nav a.active { font-weight: 600; color: #174ea6; }
+
+    .bar-wrap { background: #eee; border-radius: 3px; height: 14px; min-width: 120px; }
+    .bar-fill  { background: #1a73e8; border-radius: 3px; height: 100%; }
+    .bar-fill.muted { background: #ccc; }
+
+    .stat-section { margin-bottom: 2rem; }
+    .stat-section h2 { font-size: 1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-bottom: 0.75rem; }
+    .dead-rule { color: #999; }
   </style>
 </head>
 <body>
+  <nav>
+    <a href="/" {% if request.path == '/' %}class="active"{% endif %}>Rules</a>
+    <a href="/stats" {% if request.path == '/stats' %}class="active"{% endif %}>Statistics</a>
+  </nav>
   {% block content %}{% endblock %}
   {% block scripts %}{% endblock %}
 </body>

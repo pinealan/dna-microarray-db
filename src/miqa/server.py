@@ -7,6 +7,7 @@ Run with:
 
 import json
 import os
+import re
 
 import psycopg
 from flask import Flask, jsonify, render_template, request
@@ -249,3 +250,164 @@ def _build_preview(
         )
 
     return preview
+
+
+# ---------------------------------------------------------------------------
+# Stats page
+# ---------------------------------------------------------------------------
+
+# Attributes for which rule-based mapping makes sense (excludes gender, age).
+_MAPPABLE_ATTRS = ['tissue', 'disease', 'extraction_protocol']
+
+
+@app.get('/stats')
+def stats():
+    with get_conn() as conn:
+        data = _compute_stats(conn)
+    return render_template('stats.html', **data)
+
+
+def _compute_stats(conn) -> dict:
+    total = conn.execute('SELECT COUNT(*) FROM sample').fetchone()[0]
+    rules = _fetch_rules(conn)
+
+    # Pre-group rules by source_attribute, sorted by priority desc.
+    rules_by_source: dict[str, list[dict]] = {}
+    for r in rules:
+        rules_by_source.setdefault(r['source_attribute'], []).append(r)
+    for lst in rules_by_source.values():
+        lst.sort(key=lambda r: r['priority'], reverse=True)
+
+    rule_hits: dict[int, int] = {r['rule_id']: 0 for r in rules}
+
+    coverage = []
+    distributions = {}   # attr -> [(canonical_value, count), ...]
+    unmapped_values = {}  # attr -> [(raw_value, count), ...]  top-20 unmapped
+
+    for attr in _MAPPABLE_ATTRS:
+        freq_rows = conn.execute(  # noqa: S608
+            f'SELECT {attr}, COUNT(*) FROM sample'
+            f' WHERE {attr} IS NOT NULL'
+            f' GROUP BY {attr}'
+            f' ORDER BY COUNT(*) DESC',
+        ).fetchall()
+
+        has_value = sum(cnt for _, cnt in freq_rows)
+        attr_rules = rules_by_source.get(attr, [])
+
+        canonical_counts: dict[str, int] = {}
+        unmapped: dict[str, int] = {}
+
+        for raw_val, cnt in freq_rows:
+            matched = norm.first_matching_rule(raw_val, attr_rules)
+            if matched:
+                rule_hits[matched['rule_id']] = rule_hits.get(matched['rule_id'], 0) + cnt
+                canonical_counts[matched['attribute_value']] = (
+                    canonical_counts.get(matched['attribute_value'], 0) + cnt
+                )
+            else:
+                unmapped[raw_val] = cnt
+
+        mapped = sum(canonical_counts.values())
+        coverage.append({
+            'attribute': attr,
+            'total': total,
+            'has_value': has_value,
+            'mapped': mapped,
+            'unmapped': has_value - mapped,
+            'pct_covered': round(mapped / total * 100, 1) if total else 0,
+        })
+        distributions[attr] = sorted(canonical_counts.items(), key=lambda x: x[1], reverse=True)
+        unmapped_values[attr] = sorted(unmapped.items(), key=lambda x: x[1], reverse=True)[:20]
+
+    # Gender — already an enum; no rule simulation needed.
+    gender_rows = conn.execute(
+        'SELECT gender::text, COUNT(*) FROM sample GROUP BY gender',
+    ).fetchall()
+    gender_counts = {(g if g is not None else 'not_recorded'): c for g, c in gender_rows}
+    gender_has_value = sum(c for g, c in gender_counts.items() if g != 'not_recorded')
+    coverage.append({
+        'attribute': 'gender',
+        'total': total,
+        'has_value': gender_has_value,
+        'mapped': None,
+        'unmapped': None,
+        'pct_covered': None,
+    })
+
+    # Age — numeric histogram.
+    age_rows = conn.execute('SELECT age FROM sample WHERE age IS NOT NULL').fetchall()
+    age_values = [r[0] for r in age_rows]
+    age_histogram = _build_age_histogram(age_values)
+    coverage.append({
+        'attribute': 'age',
+        'total': total,
+        'has_value': len(age_values),
+        'mapped': None,
+        'unmapped': None,
+        'pct_covered': None,
+    })
+
+    # Rule effectiveness — sorted by hit count descending.
+    rule_effectiveness = sorted(
+        [{'rule': r, 'hits': rule_hits.get(r['rule_id'], 0)} for r in rules],
+        key=lambda x: x['hits'],
+        reverse=True,
+    )
+
+    # Platform × repository breakdown for tissue (most biologically relevant).
+    tissue_rules = rules_by_source.get('tissue', [])
+    pb_rows = conn.execute(
+        'SELECT tissue, platform_id, repository_id, COUNT(*)'
+        '  FROM sample'
+        ' WHERE tissue IS NOT NULL'
+        ' GROUP BY tissue, platform_id, repository_id',
+    ).fetchall()
+    platform_breakdown: dict[str, dict[str, int]] = {}
+    for raw_tissue, platform_id, repo_id, cnt in pb_rows:
+        matched = norm.first_matching_rule(raw_tissue, tissue_rules)
+        canonical = matched['attribute_value'] if matched else f'(unmapped) {raw_tissue}'
+        label = f'{repo_id or "?"} / {platform_id or "?"}'
+        platform_breakdown.setdefault(canonical, {})
+        platform_breakdown[canonical][label] = platform_breakdown[canonical].get(label, 0) + cnt
+    # Sort canonical tissue by total count descending.
+    platform_breakdown = dict(
+        sorted(
+            platform_breakdown.items(),
+            key=lambda kv: sum(kv[1].values()),
+            reverse=True,
+        )
+    )
+
+    return {
+        'total_samples': total,
+        'coverage': coverage,
+        'distributions': distributions,
+        'unmapped_values': unmapped_values,
+        'rule_effectiveness': rule_effectiveness,
+        'gender_counts': gender_counts,
+        'age_histogram': age_histogram,
+        'platform_breakdown': platform_breakdown,
+    }
+
+
+def _build_age_histogram(age_values: list[str]) -> list[dict]:
+    """Bucket age strings into 10-year intervals. Non-numeric values are counted separately."""
+    buckets: dict[int, int] = {}
+    non_numeric = 0
+
+    for val in age_values:
+        m = re.search(r'\d+', val)
+        if m:
+            bucket = (int(m.group()) // 10) * 10
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+        else:
+            non_numeric += 1
+
+    result = [
+        {'label': f'{b}–{b + 9}', 'bucket': b, 'count': c}
+        for b, c in sorted(buckets.items())
+    ]
+    if non_numeric:
+        result.append({'label': 'non-numeric', 'bucket': 9999, 'count': non_numeric})
+    return result
