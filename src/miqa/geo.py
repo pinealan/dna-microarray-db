@@ -27,6 +27,7 @@ from typing import Any, cast, Iterable
 
 import httpx
 import psycopg
+import typer
 from bs4 import BeautifulSoup
 
 from miqa import db, storage
@@ -487,12 +488,39 @@ def save_sample(
     return db_sample_id
 
 
-# Use module main as integration test
-if __name__ == '__main__':
-    from pprint import pprint
-    from miqa.utils import setup_logging
+app = typer.Typer(help='GEO crawler')
 
-    setup_logging()
+
+@app.command()
+def import_one(series_id: str):
+    import miqa.config as cfg
+
+    conn = psycopg.connect(cfg.DATABASE_URL, autocommit=True)
+    series = geo_exact_lookup(series_id)
+
+    # TODO: Extract metadata from series, so we can pass it on later to samples
+    # series_enriched = enrich_series(series)
+
+    for sample_id in series['sample_id']:
+        # TODO: Re-retrieve sample after a certain period of time has passed since
+        # it was last inspected/processed so we get a change to see updates
+        if db.seen_sample(conn, 'geo', sample_id):
+            logger.debug('Seen sample')
+            continue
+
+        # Process a single sample
+        sample = geo_exact_lookup(sample_id)
+        if (idat_files := find_idat_files(sample)) is None:
+            continue
+        sample_enriched = enrich_sample(sample)
+        db_id = save_sample(sample_id, sample_enriched, idat_files, conn)
+        logger.info(f'{sample_id} inserted as {db_id=}')
+
+
+@app.command()
+def load_and_dump():
+    import json
+    from pprint import pprint
 
     # Search Entrez records
     res_esearch = e_search(
@@ -507,11 +535,35 @@ if __name__ == '__main__':
     pprint(res_esum)
 
     # Get GEO record of Series
-    series_accn = res_esum['result'][eid]['accession']
-    res_geo = geo_exact_lookup(series_accn)
-    pprint(res_geo)
+    # series_accn = res_esum['result'][eid]['accession']
+    series_accn = 'GSE318173'
+    res_series = geo_exact_lookup(series_accn)
+    # pprint(res_series)
+    json.dump(res_series, open(series_accn + '.json', 'w'))
 
     # Get GEO record of Sample
-    sample_accn = res_geo['sample_id'][0]
-    res_geo = geo_exact_lookup(sample_accn)
-    pprint(res_geo)
+    sample_accn = res_series['sample_id'][0]
+    res_sample = geo_exact_lookup(sample_accn)
+    # pprint(res_sample)
+    json.dump(res_sample, open(sample_accn + '.json', 'w'))
+
+
+@app.command()
+def show_enrich():
+    import json
+
+    series_accn = 'GSE318173'
+    res_series = json.load(open(series_accn + '.json'))
+    sample_accn = res_series['sample_id'][0]
+    res_sample = json.load(open(sample_accn + '.json'))
+
+    # pprint(enrich_series(res_series))
+    print(json.dumps(enrich_sample(res_sample)))
+
+
+# Use module main as integration test or quick script
+if __name__ == '__main__':
+    from miqa.utils import setup_logging
+
+    setup_logging()
+    app()
