@@ -60,22 +60,39 @@
   <div class="panel">
     <h2>Preview</h2>
 
-    <label style="font-size:0.8rem;color:#555;">Source attribute:</label>
-    <select
-      style="width:auto;margin-bottom:0.75rem;"
-      name="source"
-      hx-get="/preview"
-      hx-trigger="change"
-      hx-target="#preview-table"
-      hx-swap="innerHTML"
-      hx-include="[name='source']"
-    >
-      <option value="tissue" {% if preview_source == 'tissue' %}selected{% endif %}>tissue</option>
-      <option value="disease" {% if preview_source == 'disease' %}selected{% endif %}>disease</option>
-      <option value="gender" {% if preview_source == 'gender' %}selected{% endif %}>gender</option>
-      <option value="age" {% if preview_source == 'age' %}selected{% endif %}>age</option>
-      <option value="extraction_protocol" {% if preview_source == 'extraction_protocol' %}selected{% endif %}>extraction_protocol</option>
-    </select>
+    <div id="preview-controls" style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;margin-bottom:0.75rem;">
+      <div>
+        <label style="font-size:0.8rem;color:#555;display:block;">Source attribute</label>
+        <select
+          style="width:auto;"
+          name="source"
+          hx-get="/preview"
+          hx-trigger="change"
+          hx-target="#preview-table"
+          hx-swap="innerHTML"
+          hx-include="#preview-controls"
+        >
+          <option value="tissue" {% if preview_source == 'tissue' %}selected{% endif %}>tissue</option>
+          <option value="disease" {% if preview_source == 'disease' %}selected{% endif %}>disease</option>
+          <option value="gender" {% if preview_source == 'gender' %}selected{% endif %}>gender</option>
+          <option value="age" {% if preview_source == 'age' %}selected{% endif %}>age</option>
+          <option value="extraction_protocol" {% if preview_source == 'extraction_protocol' %}selected{% endif %}>extraction_protocol</option>
+        </select>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <label style="font-size:0.8rem;color:#555;display:block;">Filter by sample IDs (comma-separated)</label>
+        <input
+          type="text"
+          name="ids"
+          placeholder="e.g. GSM123456, GSM789012"
+          hx-get="/preview"
+          hx-trigger="input delay:400ms, change"
+          hx-target="#preview-table"
+          hx-swap="innerHTML"
+          hx-include="#preview-controls"
+        />
+      </div>
+    </div>
 
     <div id="preview-table">
       {% include "partials/preview_table.html" %}
