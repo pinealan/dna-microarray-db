@@ -1,6 +1,6 @@
 import pytest
 
-from miqa.geo import geo_exact_lookup, enrich_sample
+from miqa.geo import geo_exact_lookup
 
 
 @pytest.fixture(scope='session')
@@ -22,9 +22,3 @@ def test_series(series):
     # TODO preprocess these from list[str] -> str
     assert len(series['overall_design']) > 0
     assert len(series['summary']) > 0
-
-
-def test_sample(sample):
-    res = enrich_sample(sample)
-    assert res['tissue'] == 'whole blood'
-    assert res['gender'] == 'male'

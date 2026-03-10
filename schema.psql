@@ -21,14 +21,8 @@ create table if not exists sample (
     repository_series_id    text,             -- GSExxxxxx or study accession
     platform_id             text references platform,
 
-    -- structured metadata (best-effort, nullable)
-    gender                  gender,
-    age                     text,
-    tissue                  text,
-    disease                 text,
-    extraction_protocol     text,
-    -- unstructured overflow
-    extras                  jsonb,
+    source_metadata         jsonb,
+    normalised_metadata     jsonb,
     -- lifecycle
     discovered_at           timestamptz not null default now(),
     unique (repository_id, repository_sample_id)

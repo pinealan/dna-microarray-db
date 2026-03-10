@@ -17,18 +17,17 @@ GPL16304: HumanMethylation450 BeadChip
 GPL21145: MethylationEPIC
 """
 
+import json
 import logging
-import re
 import sys
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast, Iterable
+from typing import Iterable
 
 import httpx
 import psycopg
 import typer
-from bs4 import BeautifulSoup
+import toolz as tz
 
 from miqa import db, storage
 from miqa.utils import assert_list_str, guess_idat_channel, streamed_download
@@ -39,7 +38,7 @@ E_UTILS_BASE = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'
 GEO_ACCN_BASE = 'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi'
 GEO_FTP_BASE = 'https://ftp.ncbi.nlm.nih.gov/geo'
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__spec__.name)
 
 
 class GEOError(MiqaError):
@@ -194,42 +193,23 @@ def e_summary(id: int | str) -> dict:
     return res.json()
 
 
-# --------------------
-# GEO FTP fetcher
-# (unused as of now)
-# --------------------
+platforms = ['GPL13534', 'GPL21145', 'GPL16304']
+
+series_with_idat_search_term = ' AND '.join(
+    ['idat[suppFile]', 'gse[Entry Type]', f'({" OR ".join([p + "[accn]" for p in platforms])})']
+)
 
 
-@dataclass
-class SampleSuppFile:
-    accession_id: str
-    filename: str
-    url: str
-
-
-def geo_ftp_series(accession_id) -> httpx.Response:
-    url = GEO_FTP_BASE + f'/series/{accession_id[:-3]}nnn/{accession_id}/'
-    res = httpx.get(url)
-
-    if res.status_code != 200:
-        raise RuntimeError(f'Request for sampling listing failed with status: {res.status_code}')
-
-    return res
-
-
-def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
-    url = GEO_FTP_BASE + f'/samples/{accession_id[:-3]}nnn/{accession_id}/suppl/'
-    res = httpx.get(url)
-
-    if res.status_code != 200:
-        raise RuntimeError(f'Request for sampling listing failed with status: {res.status_code}')
-
-    anchors = BeautifulSoup(res.text, 'html.parser').select('pre a')
-    return [
-        SampleSuppFile(accession_id, href, url + href)
-        for a in anchors
-        if (href := cast(str, a.get('href'))).endswith('.gz')
-    ]
+def geo_series_id_iter() -> Iterable[str]:
+    """Return an iterator of GEO series IDs."""
+    entrez_ids = e_search_all(term=series_with_idat_search_term)
+    # TODO: eSummary supports fetching more than 1 ID at a time. We can save lots of
+    # network calls if we do a batched query.
+    for eids in tz.partition_all(100, entrez_ids):
+        res = e_summary(','.join(eids))['result']
+        for eid in eids:
+            # Look into entrez's record for corresponding GEO accession ID
+            yield res[eid]['accession']
 
 
 # --------------------
@@ -237,12 +217,7 @@ def geo_ftp_ls_sample_files(accession_id) -> list[SampleSuppFile]:
 # --------------------
 
 
-def enrich_series(series: dict):
-    """TODO"""
-    return
-
-
-def find_idat_files(sample) -> list[str] | None:
+def find_idat_files(sample: dict) -> list[str] | None:
     """Extract the idat file FTP paths of the given sample."""
     series_id = sample['series_id']
 
@@ -260,6 +235,13 @@ def find_idat_files(sample) -> list[str] | None:
         return
 
     return idat_files
+
+
+def join_series_sample_attrs(sample: dict, series: dict) -> dict:
+    return sample | {
+        'series_summary': series['summary'],
+        'series_design': series['overall_design'],
+    }
 
 
 _CHAR_PATTERNS: list[tuple[str, str]] = [
@@ -285,103 +267,40 @@ _GENDER_MAP = {
 }
 
 
-def parse_characteristic(line: str) -> tuple[str, str] | None:
-    """
-    Parse a single characteristics_ch1 string like 'tissue: blood'.
-    Returns (field_name, value) for the first recognised field, or None if unrecognised.
-    """
-    for pattern, field in _CHAR_PATTERNS:
-        m = re.match(pattern, line, re.IGNORECASE)
-        if m:
-            extracted = line[m.end() :].strip()
-            return field, extracted
-    return None
+def upsert_sample(sample, series, conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
 
+            INSERT INTO sample (
+                repository_id, repository_sample_id, repository_series_id,
+                platform_id, source_metadata, normalised_metadata
+            ) VALUES (
+                'geo', %s, %s, %s, %s, %s
+            )
+            ON CONFLICT (repository_id, repository_sample_id) DO UPDATE
+            SET source_metadata = EXCLUDED.source_metadata,
+                normalised_metadata = EXCLUDED.normalised_metadata
+            RETURNING id;
+            """,
+            (
+                sample['entity_id'],
+                series['entity_id'],
+                sample['platform_id'],
+                json.dumps(join_series_sample_attrs(sample, series)),
+                None,  # TODO: Do we normalise metadata right away?
+            ),
+        )
+        row = cur.fetchone()
+        if row is not None:
+            return row[0]
 
-def enrich_sample(sample: dict) -> dict[str, Any]:
-    """
-    Pull structured metadata out of a GEO SOFT sample dict.
-    Returns a dict ready to be passed to db.upsert_sample().
-    """
-    structured: dict[str, Any] = {}
-    extras: dict[str, Any] = {}
-
-    # Series (parent GSE, if there are multiple of them, treat the first as canonical)
-    series_id = sample.get('series_id')
-    if isinstance(series_id, list):
-        series_id = series_id[0]
-    structured['repository_series_id'] = series_id
-
-    # Platform
-    structured['platform_id'] = sample.get('platform_id')
-
-    # Parse characteristics_ch1 entries
-    chars = sample.get('characteristics_ch1', [])
-    if isinstance(chars, str):
-        chars = [chars]
-
-    remaining_chars = []
-    for char in chars:
-        parsed = parse_characteristic(char)
-        if parsed:
-            field, val = parsed
-            if field not in structured:
-                structured[field] = val
-        else:
-            remaining_chars.append(char)
-
-    if remaining_chars:
-        extras['characteristics_ch1'] = remaining_chars
-
-    # Extraction protocol
-    structured['extraction_protocol'] = sample.get('extract_protocol_ch1')
-
-    # Normalise gender
-    gender_raw = structured.pop('gender', None)
-    if gender_raw:
-        structured['gender'] = _GENDER_MAP.get(gender_raw.lower().strip())
-
-    # Everything else goes to extras
-    skip_keys = {
-        'entity_type',
-        'entity_id',
-        'series_id',
-        'platform_id',
-        'characteristics_ch1',
-        'extract_protocol_ch1',
-        'supplementary_file',
-    }
-    for k, v in sample.items():
-        if k not in skip_keys and k not in structured:
-            extras[k] = v
-
-    # TODO: fields to be processed
-    # [x] characteristics_ch1
-    # [ ] data_processing
-    # [ ] extract_protocol_ch1
-    # [ ] growth_protocol_ch1
-    # [ ] hyb_protocol
-    # [ ] label_ch1
-    # [ ] label_protocol_ch1
-    # [ ] hyb_protocol
-    # [ ] scan_protocol
-    # [ ] source_name_ch1
-
-    structured['extras'] = extras or None
-    return structured
+        raise db.DBError('Could not upsert row')
 
 
 # --------------------
 # GEO crawler entrypoint
 # --------------------
-
-
-platforms = ['GPL13534', 'GPL21145', 'GPL16304']
-
-
-series_with_idat_search_term = ' AND '.join(
-    ['idat[suppFile]', 'gse[Entry Type]', f'({" OR ".join([p + "[accn]" for p in platforms])})']
-)
 
 
 def crawl_and_process(
@@ -392,19 +311,12 @@ def crawl_and_process(
         raise RuntimeError('DB connection must be provided when not dry-run.')
 
     # TODO: Lots of parallelisation possible in this workflow
-
-    entrez_ids = e_search_all(term=series_with_idat_search_term)
     cnt = 0
 
     # TODO: eSummary supports fetching more than 1 ID at a time. We can save lots of
     # network calls if we do a batched query.
-    for eid in entrez_ids:
-        # Look into entrez's record for corresponding GEO accession ID
-        series_id = e_summary(eid)['result'][eid]['accession']
+    for series_id in geo_series_id_iter():
         series = geo_exact_lookup(series_id)
-
-        # TODO: Extract metadata from series, so we can pass it on later to samples
-        # series_enriched = enrich_series(series)
 
         for sample_id in series['sample_id']:
             # TODO: Re-retrieve sample after a certain period of time has passed since
@@ -417,12 +329,11 @@ def crawl_and_process(
             sample = geo_exact_lookup(sample_id)
             if (idat_files := find_idat_files(sample)) is None:
                 continue
-            sample_enriched = enrich_sample(sample)
 
             # Dryrun short circuit and log
             if dry_run:
                 cnt += 1
-                logger.info(f'(dry-run) {cnt=} Would insert sample {sample_id} {sample_enriched=}')
+                logger.info(f'(dry-run) {cnt=} Would insert sample {sample_id} {sample=}')
                 for fpath in idat_files:
                     logger.info(f'(dry-run) Would upload {fpath}')
                 continue
@@ -431,7 +342,7 @@ def crawl_and_process(
             # Save sample to database
             try:
                 if (
-                    db_id := save_sample(sample_id, sample_enriched, idat_files, conn)
+                    db_id := save_sample_and_idat(sample_id, sample, idat_files, conn)
                 ) is not None:
                     cnt += 1
                     logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
@@ -441,7 +352,7 @@ def crawl_and_process(
                 logger.error(e, f'Failed to save {sample_id}')
 
 
-def save_sample(
+def save_sample_and_idat(
     sample_id: str,
     sample_enriched: dict,
     idat_files: list[str],
@@ -512,8 +423,7 @@ def import_one(series_id: str):
         sample = geo_exact_lookup(sample_id)
         if (idat_files := find_idat_files(sample)) is None:
             continue
-        sample_enriched = enrich_sample(sample)
-        db_id = save_sample(sample_id, sample_enriched, idat_files, conn)
+        db_id = upsert_sample(sample, series, conn)
         logger.info(f'{sample_id} inserted as {db_id=}')
 
 
@@ -538,27 +448,60 @@ def load_and_dump():
     # series_accn = res_esum['result'][eid]['accession']
     series_accn = 'GSE318173'
     res_series = geo_exact_lookup(series_accn)
-    # pprint(res_series)
     json.dump(res_series, open(series_accn + '.json', 'w'))
 
     # Get GEO record of Sample
     sample_accn = res_series['sample_id'][0]
     res_sample = geo_exact_lookup(sample_accn)
-    # pprint(res_sample)
     json.dump(res_sample, open(sample_accn + '.json', 'w'))
 
 
 @app.command()
-def show_enrich():
+def show_enrich(series_accn: str = 'GSE318173'):
     import json
 
-    series_accn = 'GSE318173'
     res_series = json.load(open(series_accn + '.json'))
     sample_accn = res_series['sample_id'][0]
     res_sample = json.load(open(sample_accn + '.json'))
 
-    # pprint(enrich_series(res_series))
-    print(json.dumps(enrich_sample(res_sample)))
+    # TODO: Use rules from miqa.normalise
+    # print(json.dumps(enrich_sample(res_sample)))
+
+
+@app.command()
+def show_raw(
+    series_accn: str = 'GSE318173',
+):
+    from pprint import pprint
+
+    res_series = geo_exact_lookup(series_accn)
+    sample_accn = res_series['sample_id'][0]
+    res_sample = geo_exact_lookup(sample_accn)
+    pprint(res_series)
+    pprint(res_sample)
+
+
+@app.command()
+def crawl(
+    skip_seen: bool = True,
+):
+    import miqa.config as config
+
+    conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
+    cnt = 1
+    for series_id in geo_series_id_iter():
+        series = geo_exact_lookup(series_id)
+        logger.debug(f'{series_id=} has {len(series["sample_id"])} samples')
+
+        for sample_id in series['sample_id']:
+            if skip_seen and db.seen_sample(conn, 'geo', sample_id):
+                logger.debug('Seen sample')
+                continue
+
+            sample = geo_exact_lookup(sample_id)
+            db_id = upsert_sample(sample, series, conn)
+            logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
+            cnt += 1
 
 
 # Use module main as integration test or quick script
