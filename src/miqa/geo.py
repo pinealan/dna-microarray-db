@@ -17,6 +17,7 @@ GPL16304: HumanMethylation450 BeadChip
 GPL21145: MethylationEPIC
 """
 
+import asyncio
 import json
 import logging
 import sys
@@ -76,6 +77,43 @@ def geo_exact_lookup(accession_id: str, *args, **kwargs) -> dict:
     if len(res) > 1:
         raise ValueError(f'Received more than 1 item from exact lookup of {accession_id}')
     return res[0]
+
+
+async def _geo_lookup_async(
+    client: httpx.AsyncClient,
+    accession_id: str,
+    extra_params: dict = {},
+) -> list[dict]:
+    params = {'acc': accession_id, 'targ': 'self', 'view': 'brief', 'form': 'text'} | extra_params
+    res = await client.get(GEO_ACCN_BASE, params=params)
+    return parse_soft_lines(res.text.splitlines())
+
+
+async def fetch_samples_async(
+    sample_ids: list[str],
+    concurrency: int = 5,
+) -> list[tuple[str, dict | Exception]]:
+    """Fetch multiple GEO sample records in parallel.
+
+    Returns a list of (sample_id, result) pairs where result is either a parsed
+    sample dict or an Exception if the request failed.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def fetch_one(client: httpx.AsyncClient, sample_id: str):
+        async with sem:
+            records = await _geo_lookup_async(client, sample_id)
+            if len(records) != 1:
+                raise ValueError(f'Expected 1 record for {sample_id}, got {len(records)}')
+            return records[0]
+
+    async with httpx.AsyncClient() as client:
+        results = await asyncio.gather(
+            *[fetch_one(client, sid) for sid in sample_ids],
+            return_exceptions=True,
+        )
+
+    return list(zip(sample_ids, results))
 
 
 class SoftParser:
@@ -484,24 +522,44 @@ def show_raw(
 @app.command()
 def crawl(
     skip_seen: bool = True,
+    concurrency: int = 10,
 ):
     import miqa.config as config
 
     conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
     cnt = 1
     for series_id in geo_series_id_iter():
-        series = geo_exact_lookup(series_id)
-        logger.debug(f'{series_id=} has {len(series["sample_id"])} samples')
+        try:
+            series = geo_exact_lookup(series_id)
+        except Exception:
+            logger.exception(f'Failed to lookup {series_id=}')
+            continue
 
-        for sample_id in series['sample_id']:
-            if skip_seen and db.seen_sample(conn, 'geo', sample_id):
-                logger.debug('Seen sample')
+        unseen_ids = [
+            sid
+            for sid in series['sample_id']
+            if not (skip_seen and db.seen_sample(conn, 'geo', sid))
+        ]
+        logger.debug(f'{series_id=}: {len(series["sample_id"])} samples, {len(unseen_ids)} unseen')
+
+        if not unseen_ids:
+            continue
+
+        # Fetch all unseen samples for this series in parallel, then write sequentially.
+        results = asyncio.run(fetch_samples_async(unseen_ids, concurrency=concurrency))
+
+        for sample_id, sample_or_exc in results:
+            if isinstance(sample_or_exc, Exception):
+                logger.error(f'Failed to fetch {sample_id}: {sample_or_exc}')
                 continue
-
-            sample = geo_exact_lookup(sample_id)
-            db_id = upsert_sample(sample, series, conn)
-            logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
-            cnt += 1
+            try:
+                db_id = upsert_sample(sample_or_exc, series, conn)
+                logger.info(f'{cnt=} {sample_id} inserted as {db_id=}')
+                cnt += 1
+            except psycopg.errors.ForeignKeyViolation:
+                logger.error(f'Failed to insert sample {sample_id=} with uncatalogued attribute')
+            except Exception:
+                logger.exception(f'Failed to insert {sample_id=}')
 
 
 # Use module main as integration test or quick script
