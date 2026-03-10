@@ -1,0 +1,45 @@
+<form
+  hx-put="/rules/{{ rule.id }}"
+  hx-target="#rule-list"
+  hx-swap="innerHTML"
+  @htmx:after-request="editing = false"
+  style="display:grid;grid-template-columns:repeat(6,1fr) auto;gap:0.4rem;align-items:end;padding:0.4rem 0.5rem;"
+>
+  <div>
+    <label style="font-size:0.75rem;color:#555;">Source</label>
+    <input type="text" name="source_attribute" value="{{ rule.source_attribute }}" required />
+  </div>
+  <div style="display:flex;align-items:flex-end;justify-content:center;padding-bottom:0.3rem;">→</div>
+  <div>
+    <label style="font-size:0.75rem;color:#555;">Target</label>
+    <select name="target_attribute" required>
+      {% for field in ['tissue','disease','gender','age','extraction_protocol'] %}
+        <option value="{{ field }}" {% if rule.target_attribute == field %}selected{% endif %}>{{ field }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:0.75rem;color:#555;">Pattern</label>
+    <input type="text" name="pattern" value="{{ rule.pattern }}" required />
+  </div>
+  <div>
+    <label style="font-size:0.75rem;color:#555;">Value</label>
+    <input type="text" name="attribute_value" value="{{ rule.attribute_value }}" required />
+  </div>
+  <div>
+    <label style="font-size:0.75rem;color:#555;">Type</label>
+    <select name="rule_type" required>
+      {% for rt in ['substring','glob','regex'] %}
+        <option value="{{ rt }}" {% if rule.rule_type == rt %}selected{% endif %}>{{ rt }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label style="font-size:0.75rem;color:#555;">Pri</label>
+    <input type="number" name="priority" value="{{ rule.priority }}" style="width:4rem;" />
+  </div>
+  <div style="display:flex;gap:0.25rem;align-items:flex-end;">
+    <button type="submit" class="primary">Save</button>
+    <button type="button" @click="editing = false">Cancel</button>
+  </div>
+</form>

@@ -1,0 +1,40 @@
+{% if preview_rows %}
+<p style="font-size:0.8rem;color:#555;margin:0 0 0.5rem;">
+  Showing {{ preview_rows|length }} sample{{ 's' if preview_rows|length != 1 else '' }}
+  for <strong>{{ preview_source }}</strong>
+</p>
+<table>
+  <thead>
+    <tr>
+      <th>Sample ID</th>
+      <th>Raw value</th>
+      <th>Rule</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in preview_rows %}
+    <tr>
+      <td>{{ row.sample_id }}</td>
+      <td>{{ row.raw_value }}</td>
+      <td>
+        {% if row.matched_rule %}
+          <span class="badge">#{{ row.matched_rule.id }}</span>
+        {% else %}
+          <span class="no-match">none</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if row.result %}
+          {{ row.result }}
+        {% else %}
+          <span class="no-match">—</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#999;font-size:0.875rem;">No samples found for this attribute.</p>
+{% endif %}

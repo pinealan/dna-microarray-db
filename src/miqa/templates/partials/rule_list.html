@@ -1,0 +1,26 @@
+{% if rules %}
+<table>
+  <thead>
+    <tr>
+      <th>Source</th>
+      <th>→</th>
+      <th>Target</th>
+      <th>Pattern</th>
+      <th>Type</th>
+      <th>Pri</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for rule in rules %}
+      {% include "partials/rule_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p style="color:#999;font-size:0.875rem;">No rules yet.</p>
+{% endif %}
+
+<div class="add-rule-section">
+  {% include "partials/rule_form.html" %}
+</div>

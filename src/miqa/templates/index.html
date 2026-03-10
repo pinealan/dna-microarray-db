@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="app-header">
+  <h1>Normalisation Rules</h1>
+
+  <div x-data="{ loading: false, result: null }">
+    <button
+      class="primary"
+      :disabled="loading"
+      @click="
+        loading = true;
+        result = null;
+        fetch('/apply', { method: 'POST' })
+          .then(r => r.json())
+          .then(d => { result = d.updated; loading = false; })
+          .catch(() => { loading = false; });
+      "
+    >
+      <span x-show="!loading">Apply All Rules</span>
+      <span x-show="loading">Applying&hellip;</span>
+    </button>
+    <span
+      class="toast"
+      x-show="result !== null"
+      x-text="'Updated ' + result + ' sample' + (result === 1 ? '' : 's')"
+    ></span>
+  </div>
+</div>
+
+<div class="layout">
+
+  <!-- Left: Rules panel -->
+  <div class="panel">
+    <h2>Rules</h2>
+
+    <label style="font-size:0.8rem;color:#555;">Filter by target:</label>
+    <select
+      style="width:auto;margin-bottom:0.75rem;"
+      hx-get="/rules"
+      hx-trigger="change"
+      hx-target="#rule-list"
+      hx-swap="innerHTML"
+      name="target"
+    >
+      <option value="">— all —</option>
+      <option value="tissue">tissue</option>
+      <option value="disease">disease</option>
+      <option value="gender">gender</option>
+      <option value="age">age</option>
+      <option value="extraction_protocol">extraction_protocol</option>
+    </select>
+
+    <div id="rule-list">
+      {% include "partials/rule_list.html" %}
+    </div>
+  </div>
+
+  <!-- Right: Preview panel -->
+  <div class="panel">
+    <h2>Preview</h2>
+
+    <label style="font-size:0.8rem;color:#555;">Source attribute:</label>
+    <select
+      style="width:auto;margin-bottom:0.75rem;"
+      name="source"
+      hx-get="/preview"
+      hx-trigger="change"
+      hx-target="#preview-table"
+      hx-swap="innerHTML"
+      hx-include="[name='source']"
+    >
+      <option value="tissue" {% if preview_source == 'tissue' %}selected{% endif %}>tissue</option>
+      <option value="disease" {% if preview_source == 'disease' %}selected{% endif %}>disease</option>
+      <option value="gender" {% if preview_source == 'gender' %}selected{% endif %}>gender</option>
+      <option value="age" {% if preview_source == 'age' %}selected{% endif %}>age</option>
+      <option value="extraction_protocol" {% if preview_source == 'extraction_protocol' %}selected{% endif %}>extraction_protocol</option>
+    </select>
+
+    <div id="preview-table">
+      {% include "partials/preview_table.html" %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}

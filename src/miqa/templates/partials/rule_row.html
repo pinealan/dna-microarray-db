@@ -1,0 +1,31 @@
+<tr class="rule-row" id="rule-{{ rule.id }}" x-data="{ editing: false }">
+  <template x-if="!editing">
+    <td colspan="7" style="padding:0;">
+      <table style="width:100%;border:none;">
+        <tr>
+          <td>{{ rule.source_attribute }}</td>
+          <td>→</td>
+          <td>{{ rule.target_attribute }}</td>
+          <td><code>{{ rule.pattern }}</code></td>
+          <td><span class="badge">{{ rule.rule_type }}</span></td>
+          <td>{{ rule.priority }}</td>
+          <td class="actions">
+            <button @click="editing = true">Edit</button>
+            <button
+              class="danger"
+              hx-delete="/rules/{{ rule.id }}"
+              hx-target="#rule-list"
+              hx-swap="innerHTML"
+              hx-confirm="Delete this rule?"
+            >Delete</button>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </template>
+  <template x-if="editing">
+    <td colspan="7" style="padding:0;">
+      {% include "partials/rule_row_edit.html" %}
+    </td>
+  </template>
+</tr>

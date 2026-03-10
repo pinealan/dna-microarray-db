@@ -1,0 +1,51 @@
+<details>
+  <summary style="cursor:pointer;font-size:0.875rem;color:#1a73e8;">+ Add Rule</summary>
+  <form
+    hx-post="/rules"
+    hx-target="#rule-list"
+    hx-swap="innerHTML"
+    hx-on::after-request="this.reset()"
+    style="margin-top:0.75rem;"
+  >
+    <div class="form-grid">
+      <div>
+        <label>Source attribute</label>
+        <input type="text" name="source_attribute" placeholder="e.g. tissue or cell type" required />
+      </div>
+      <div>
+        <label>Target attribute</label>
+        <select name="target_attribute" required>
+          <option value="">— select —</option>
+          <option value="tissue">tissue</option>
+          <option value="disease">disease</option>
+          <option value="gender">gender</option>
+          <option value="age">age</option>
+          <option value="extraction_protocol">extraction_protocol</option>
+        </select>
+      </div>
+      <div>
+        <label>Pattern</label>
+        <input type="text" name="pattern" placeholder="e.g. pbmc" required />
+      </div>
+      <div>
+        <label>Canonical value</label>
+        <input type="text" name="attribute_value" placeholder="e.g. blood" required />
+      </div>
+      <div>
+        <label>Rule type</label>
+        <select name="rule_type" required>
+          <option value="substring">substring</option>
+          <option value="glob">glob</option>
+          <option value="regex">regex</option>
+        </select>
+      </div>
+      <div>
+        <label>Priority (higher = evaluated first)</label>
+        <input type="number" name="priority" value="0" />
+      </div>
+    </div>
+    <div style="margin-top:0.6rem;">
+      <button type="submit" class="primary">Add Rule</button>
+    </div>
+  </form>
+</details>
