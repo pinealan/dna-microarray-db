@@ -65,14 +65,6 @@ class StudyLinks:
         return self.root + '/Files/' + filename
 
 
-# def find_first(predicate, coll) -> Any | None:
-#     "Find the first item in `coll` that is True for `predicate`. TODO: Move to utils?"
-#     try:
-#         return tz.first(filter(predicate, coll))
-#     except StopIteration:
-#         return None
-
-
 def get_study_links(accession: str) -> StudyLinks:
     study = httpx.get(f'{STUDY_BASE}/{accession}/info').json()
     return StudyLinks(
@@ -152,7 +144,8 @@ def _parse_sdrf_col(col: str) -> tuple[str, str | None]:
 
 
 def extract_sdrf_metadata(row: dict) -> dict[str, Any]:
-    """Extract structured metadata from an SDRF row dict.
+    """
+    Extract structured metadata from an SDRF row dict.
 
     Handles Characteristics[], Factor Value[], and Unit[] columns per the
     MAGE-TAB v1.1 spec.  Unit values are appended to their corresponding
@@ -194,107 +187,19 @@ def extract_sdrf_metadata(row: dict) -> dict[str, Any]:
     return structured
 
 
+def parse_sdrf_rows(text: str) -> list[dict]:
+    """Parse raw SDRF TSV text into a list of row dicts (column name → raw value)."""
+    return list(csv.DictReader(StringIO(text), delimiter='\t'))
+
+
+def parse_sdrf(text: str) -> list[dict]:
+    """Parse SDRF TSV text and extract structured metadata from every row."""
+    return [extract_sdrf_metadata(row) for row in parse_sdrf_rows(text)]
+
+
 # --------------------
 # Study file downloader / crawler
 # --------------------
-
-
-def get_study_files(
-    accession: str,
-    limit: int | None = None,
-    dry_run: bool = False,
-) -> None:
-    from miqa import db, storage
-
-    prefix = '-'.join(accession.split('-')[:2]) + '-'
-    suffix = accession[-3:]
-    url_base = f'{BASE_FTP}/{prefix}/{suffix}/{accession}/Files/'
-
-    res = httpx.get(url_base + f'{accession}.sdrf.txt')
-    rows = list(csv.DictReader(StringIO(res.text), delimiter='\t'))
-
-    # Identify sample name column (first column in SDRF is usually 'Source Name')
-    if not rows:
-        logger.warning(f'Empty SDRF for {accession}')
-        return
-
-    conn = None if dry_run else db.get_connection()
-
-    try:
-        cnt = 0
-        for row in rows:
-            if limit is not None and cnt >= limit:
-                break
-
-            filename = row.get('Array Data File', '').strip()
-            if not filename or not filename.lower().endswith('.idat'):
-                continue
-
-            sample_name = row.get('Source Name', filename).strip()
-            meta = extract_sdrf_metadata(row)
-            channel = guess_idat_channel(filename)
-            source_url = url_base + filename
-            s3_key = f'arrayexpress/{accession}/{filename}'
-
-            if dry_run:
-                logger.info(
-                    f'[dry-run] Would insert sample {sample_name} meta={meta} file={filename}'
-                )
-                cnt += 1
-                continue
-
-            db_sample_id = db.upsert_sample(
-                conn,
-                repository_id='arrayexpress',
-                repository_sample_id=sample_name,
-                repository_series_id=accession,
-                **meta,
-            )
-
-            idat_id = db.insert_idat_file(
-                conn,
-                sample_id=db_sample_id,
-                source_url=source_url,
-                channel=channel,
-            )
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                local_path = Path(tmpdir) / filename
-                streamed_download(source_url, str(local_path))
-                storage.upload_file(local_path, s3_key)
-
-            db.mark_idat_uploaded(conn, idat_id, s3_key)
-            conn.commit()
-
-            logger.info(f'Uploaded {s3_key}')
-            cnt += 1
-
-    finally:
-        if conn:
-            conn.close()
-
-
-# def get_study_files(accession):
-#     prefix = '-'.join(accession.split('-')[:2]) + '-'
-#     suffix = accession[-3:]
-#     url_base = f"{BASE_FTP}/{prefix}/{suffix}/{accession}/Files/"
-#     res = httpx.get(url_base + f"{accession}.sdrf.txt")
-#     res = list(csv.DictReader(StringIO(res.text), delimiter='\t'))
-#     for f in res:
-#         streamed_download(url_base + f['Array Data File'], f['Array Data File'])
-
-
-def collect_idats(limit: int | None = None, dry_run: bool = False) -> None:
-    studies = list_studies()
-    for study in studies:
-        accession = study.get('accession')
-        if not accession:
-            continue
-        logger.info(f'Processing study {accession}')
-        try:
-            get_study_files(accession, limit=limit, dry_run=dry_run)
-        except Exception as exc:
-            logger.error(f'Failed to process {accession}: {exc}')
 
 
 if __name__ == '__main__':
@@ -333,11 +238,3 @@ if __name__ == '__main__':
         # uri = urlparse(study['httpLink'])
         # res = httpx.get(study['httpLink'] + '/Files/')
         # pprint(res.text)
-
-    # Try using FTP
-    # uri = urlparse(study['ftpLink'])
-    # ftp = FTP(uri.netloc)
-    # print(ftp.login())
-    # print(ftp.cwd(uri.path))
-    # pprint(ftp.nlst())
-    # ftp.dir()
