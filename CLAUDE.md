@@ -56,4 +56,19 @@ processing, deleted after QC metrics are extracted. Track lifecycle via
 uv run -m miqa geo              # crawl GEO
 uv run -m miqa arrayexpress     # crawl ArrayExpress
 uv run pytest test/             # run tests
+uv run ruff check src/ test/    # lint
+uv run ruff format src/ test/   # format
 ```
+
+## After making code changes
+
+Always run tests and lint after any code change, and fix any errors that come up:
+
+```bash
+uv run pytest test/
+uv run ruff check src/ test/
+```
+
+- Fix all pytest failures before considering the task done.
+- Fix all ruff errors. For ruff warnings that are not errors (exit code 0), use judgement — fix them if they indicate a real issue, skip if they are noisy false positives.
+- Do not suppress errors with `# noqa` unless there is a genuine reason (e.g. a dynamic SQL column name that cannot be parameterised); leave a comment explaining why.
