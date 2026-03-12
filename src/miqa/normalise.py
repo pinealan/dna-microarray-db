@@ -18,9 +18,9 @@ def match_value(raw: str, pattern: str, rule_type: str) -> bool:
     All comparisons are case-insensitive.
     """
     if rule_type == 'substring':
-        return pattern.lower() in raw.lower()
+        return pattern.lower() in raw
     if rule_type == 'glob':
-        return fnmatch.fnmatch(raw.lower(), pattern.lower())
+        return fnmatch.fnmatch(raw, pattern.lower())
     if rule_type == 'regex':
         return bool(re.search(pattern, raw, re.IGNORECASE))
     raise ValueError(f'Unknown rule_type: {rule_type!r}')
@@ -31,19 +31,13 @@ def first_matching_rule(raw: str, rules: list[dict]) -> dict | None:
 
     *rules* must already be sorted by priority descending (highest first).
     The first match wins — subsequent rules are not evaluated.
+    All comparisons are case-insensitive.
     """
+    raw = raw.lower()
     for rule in rules:
         if match_value(raw, rule['pattern'], rule['rule_type']):
             return rule
     return None
-
-
-def _get_raw_value(sample: dict, source_attribute: str) -> str | None:
-    """Extract the raw value for *source_attribute* from a sample dict."""
-    if source_attribute in STRUCTURED_FIELDS:
-        return sample.get(source_attribute)
-    extras = sample.get('extras') or {}
-    return extras.get(source_attribute)
 
 
 def apply_rules_to_sample(sample: dict, rules: list[dict]) -> dict:
@@ -56,15 +50,15 @@ def apply_rules_to_sample(sample: dict, rules: list[dict]) -> dict:
     internally. Each group is sorted by priority descending before evaluation.
 
     Args:
-        sample: Dict with keys matching ``sample`` table columns plus an
-            optional ``extras`` key holding a nested dict.
+        sample: Dict with a ``source_metadata`` key holding the raw crawler
+            metadata as a nested dict.
         rules: List of rule dicts, each with keys:
-            id, source_attribute, pattern, rule_type,
+            rule_id, source_attribute, pattern, rule_type,
             target_attribute, attribute_value, priority.
 
     Returns:
-        Dict of ``{target_attribute: new_value}`` — may be empty if no rules
-        matched any source values.
+        Dict of ``{target_attribute: new_value}`` intended to be merged into
+        ``normalised_metadata`` — may be empty if no rules matched.
     """
     # Group rules by source_attribute, preserving priority order within each group.
     groups: dict[str, list[dict]] = {}
@@ -75,7 +69,7 @@ def apply_rules_to_sample(sample: dict, rules: list[dict]) -> dict:
     for source_attr, group in groups.items():
         # Sort descending by priority so first_matching_rule picks the highest.
         sorted_group = sorted(group, key=lambda r: r['priority'], reverse=True)
-        raw = _get_raw_value(sample, source_attr)
+        raw = (sample.get('source_metadata') or {}).get(source_attr)
         if not raw:
             continue
         matched = first_matching_rule(raw, sorted_group)

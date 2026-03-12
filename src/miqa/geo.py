@@ -315,7 +315,6 @@ def upsert_sample(sample, series, conn):
     with conn.cursor() as cur:
         cur.execute(
             """
-
             INSERT INTO sample (
                 repository_id, repository_sample_id, repository_series_id,
                 platform_id, source_metadata, normalised_metadata

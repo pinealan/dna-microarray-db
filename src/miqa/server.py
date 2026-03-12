@@ -6,7 +6,6 @@ Run with:
 """
 
 import json
-import os
 import re
 
 import psycopg
@@ -59,34 +58,17 @@ def _fetch_rules(conn, target: str | None = None) -> list[dict]:
 
 
 def _fetch_all_samples(conn) -> list[dict]:
-    rows = conn.execute(
-        'SELECT rule_id, tissue, disease, gender, age, extraction_protocol, extras  FROM sample',
-    ).fetchall()
-    cols = ['rule_id', 'tissue', 'disease', 'gender', 'age', 'extraction_protocol', 'extras']
-    return [dict(zip(cols, row)) for row in rows]
+    rows = conn.execute('SELECT id, source_metadata FROM sample').fetchall()
+    return [{'id': r[0], 'source_metadata': r[1] or {}} for r in rows]
 
 
 def _update_sample(conn, sample_id: int, changes: dict) -> None:
-    """Apply a dict of {column: value} changes to a single sample row."""
-    for col, val in changes.items():
-        if col == 'gender':
-            conn.execute(
-                'UPDATE sample SET gender = %s::gender WHERE id = %s',
-                (val, sample_id),
-            )
-        elif col in norm.STRUCTURED_FIELDS:
-            conn.execute(
-                f'UPDATE sample SET {col} = %s WHERE id = %s',  # noqa: S608
-                (val, sample_id),
-            )
-        else:
-            # Write into extras JSONB
-            conn.execute(
-                'UPDATE sample'
-                "   SET extras = jsonb_set(coalesce(extras, '{}'), %s, %s)"
-                ' WHERE id = %s',
-                ('{' + col + '}', json.dumps(val), sample_id),
-            )
+    """Merge rule-derived changes into normalised_metadata."""
+    conn.execute(
+        "UPDATE sample SET normalised_metadata = coalesce(normalised_metadata, '{}') || %s"
+        ' WHERE id = %s',
+        (json.dumps(changes), sample_id),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -170,15 +152,15 @@ def delete_rule(rule_id: int):
 
 @app.get('/preview')
 def preview():
-    source = request.args.get('source', 'tissue')
+    source_attr = request.args.get('source', 'tissue')
     limit = int(request.args.get('limit', 50))
     ids_raw = request.args.get('ids', '').strip()
     sample_ids = [s.strip() for s in ids_raw.split(',') if s.strip()] if ids_raw else None
     with get_conn() as conn:
-        rows = _build_preview(conn, source=source, limit=limit, sample_ids=sample_ids)
+        rows = _build_preview(conn, source=source_attr, limit=limit, sample_ids=sample_ids)
         rules = _fetch_rules(conn)
     return render_template(
-        'partials/preview_table.html', preview_rows=rows, preview_source=source, rules=rules
+        'partials/preview_table.html', preview_rows=rows, preview_source=source_attr, rules=rules
     )
 
 
@@ -191,7 +173,7 @@ def apply_rules():
         for sample in samples:
             changes = norm.apply_rules_to_sample(sample, rules)
             if changes:
-                _update_sample(conn, sample['rule_id'], changes)
+                _update_sample(conn, sample['id'], changes)
                 updated += 1
     return jsonify({'updated': updated})
 
@@ -215,19 +197,11 @@ def _build_preview(
     id_filter = ' AND repository_sample_id = ANY(%s)' if sample_ids else ''
     id_param = [sample_ids] if sample_ids else []
 
-    if source in norm.STRUCTURED_FIELDS:
-        col = source
-        rows = conn.execute(
-            f'SELECT id, repository_sample_id, {col} FROM sample'  # noqa: S608
-            f' WHERE {col} IS NOT NULL{id_filter} LIMIT %s',
-            (*id_param, limit),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            f'SELECT id, repository_sample_id, extras->%s FROM sample'  # noqa: S608
-            f' WHERE extras ? %s{id_filter} LIMIT %s',
-            (source, source, *id_param, limit),
-        ).fetchall()
+    rows = conn.execute(
+        'SELECT id, repository_sample_id, source_metadata->>%s FROM sample'
+        f' WHERE source_metadata ? %s{id_filter} LIMIT %s',
+        (source, source, *id_param, limit),
+    ).fetchall()
 
     preview = []
     for row in rows:
@@ -281,15 +255,16 @@ def _compute_stats(conn) -> dict:
     rule_hits: dict[int, int] = {r['rule_id']: 0 for r in rules}
 
     coverage = []
-    distributions = {}   # attr -> [(canonical_value, count), ...]
+    distributions = {}  # attr -> [(canonical_value, count), ...]
     unmapped_values = {}  # attr -> [(raw_value, count), ...]  top-20 unmapped
 
     for attr in _MAPPABLE_ATTRS:
-        freq_rows = conn.execute(  # noqa: S608
-            f'SELECT {attr}, COUNT(*) FROM sample'
-            f' WHERE {attr} IS NOT NULL'
-            f' GROUP BY {attr}'
-            f' ORDER BY COUNT(*) DESC',
+        freq_rows = conn.execute(
+            'SELECT source_metadata->>%s, COUNT(*) FROM sample'
+            ' WHERE source_metadata ? %s'
+            ' GROUP BY source_metadata->>%s'
+            ' ORDER BY COUNT(*) DESC',
+            (attr, attr, attr),
         ).fetchall()
 
         has_value = sum(cnt for _, cnt in freq_rows)
@@ -309,44 +284,53 @@ def _compute_stats(conn) -> dict:
                 unmapped[raw_val] = cnt
 
         mapped = sum(canonical_counts.values())
-        coverage.append({
-            'attribute': attr,
-            'total': total,
-            'has_value': has_value,
-            'mapped': mapped,
-            'unmapped': has_value - mapped,
-            'pct_covered': round(mapped / total * 100, 1) if total else 0,
-        })
+        coverage.append(
+            {
+                'attribute': attr,
+                'total': total,
+                'has_value': has_value,
+                'mapped': mapped,
+                'unmapped': has_value - mapped,
+                'pct_covered': round(mapped / total * 100, 1) if total else 0,
+            }
+        )
         distributions[attr] = sorted(canonical_counts.items(), key=lambda x: x[1], reverse=True)
         unmapped_values[attr] = sorted(unmapped.items(), key=lambda x: x[1], reverse=True)[:20]
 
-    # Gender — already an enum; no rule simulation needed.
+    # Gender — read from source_metadata; no rule simulation needed.
     gender_rows = conn.execute(
-        'SELECT gender::text, COUNT(*) FROM sample GROUP BY gender',
+        "SELECT source_metadata->>'gender', COUNT(*) FROM sample"
+        " GROUP BY source_metadata->>'gender'",
     ).fetchall()
     gender_counts = {(g if g is not None else 'not_recorded'): c for g, c in gender_rows}
-    gender_has_value = sum(c for g, c in gender_counts.items() if g != 'not_recorded')
-    coverage.append({
-        'attribute': 'gender',
-        'total': total,
-        'has_value': gender_has_value,
-        'mapped': None,
-        'unmapped': None,
-        'pct_covered': None,
-    })
+    gender_has_value = sum(c for g, c in gender_counts.items() if g is not None)
+    coverage.append(
+        {
+            'attribute': 'gender',
+            'total': total,
+            'has_value': gender_has_value,
+            'mapped': None,
+            'unmapped': None,
+            'pct_covered': None,
+        }
+    )
 
     # Age — numeric histogram.
-    age_rows = conn.execute('SELECT age FROM sample WHERE age IS NOT NULL').fetchall()
+    age_rows = conn.execute(
+        "SELECT source_metadata->>'age' FROM sample WHERE source_metadata ? 'age'",
+    ).fetchall()
     age_values = [r[0] for r in age_rows]
     age_histogram = _build_age_histogram(age_values)
-    coverage.append({
-        'attribute': 'age',
-        'total': total,
-        'has_value': len(age_values),
-        'mapped': None,
-        'unmapped': None,
-        'pct_covered': None,
-    })
+    coverage.append(
+        {
+            'attribute': 'age',
+            'total': total,
+            'has_value': len(age_values),
+            'mapped': None,
+            'unmapped': None,
+            'pct_covered': None,
+        }
+    )
 
     # Rule effectiveness — sorted by hit count descending.
     rule_effectiveness = sorted(
@@ -358,10 +342,10 @@ def _compute_stats(conn) -> dict:
     # Platform × repository breakdown for tissue (most biologically relevant).
     tissue_rules = rules_by_source.get('tissue', [])
     pb_rows = conn.execute(
-        'SELECT tissue, platform_id, repository_id, COUNT(*)'
+        "SELECT source_metadata->>'tissue', platform_id, repository_id, COUNT(*)"
         '  FROM sample'
-        ' WHERE tissue IS NOT NULL'
-        ' GROUP BY tissue, platform_id, repository_id',
+        "  WHERE source_metadata ? 'tissue'"
+        "  GROUP BY source_metadata->>'tissue', platform_id, repository_id",
     ).fetchall()
     platform_breakdown: dict[str, dict[str, int]] = {}
     for raw_tissue, platform_id, repo_id, cnt in pb_rows:
@@ -405,8 +389,7 @@ def _build_age_histogram(age_values: list[str]) -> list[dict]:
             non_numeric += 1
 
     result = [
-        {'label': f'{b}–{b + 9}', 'bucket': b, 'count': c}
-        for b, c in sorted(buckets.items())
+        {'label': f'{b}–{b + 9}', 'bucket': b, 'count': c} for b, c in sorted(buckets.items())
     ]
     if non_numeric:
         result.append({'label': 'non-numeric', 'bucket': 9999, 'count': non_numeric})
