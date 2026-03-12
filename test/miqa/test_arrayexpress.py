@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from miqa.arrayexpress import parse_sdrf
+from miqa.arrayexpress import parse_idf, parse_sdrf
 
 FIXTURE_DIR = Path(__file__).parent.parent
 
@@ -204,3 +204,203 @@ class TestEMTAB14823Metadata:
             assert 'Source Name' not in row
             assert 'Protocol REF' not in row
             assert 'Array Data File' not in row
+
+
+# ---------------------------------------------------------------------------
+# parse_idf — synthetic fixtures
+# ---------------------------------------------------------------------------
+
+IDF_MINIMAL = (
+    '\n'.join(
+        [
+            'MAGE-TAB Version\t1.1',
+            'Investigation Title\tTest Study',
+            'Experiment Description\tA test study for unit testing.',
+            'Experimental Design\tcase control design',
+            'Experimental Factor Name\tdisease',
+            'SDRF File\ttest.sdrf.txt',
+            'Date of Experiment\t2024-01-15',
+            'Public Release Date\t2025-06-01',
+            'PubMed ID\t',
+            'Publication DOI\t10.1234/test',
+            'Person Last Name\tSmith',
+            'Person First Name\tAlice',
+            'Person Email\talice@example.com',
+            'Person Affiliation\tTest University',
+            'Person Roles\tsubmitter',
+            'Protocol Name\tP-001\tP-002',
+            'Protocol Type\tsample collection protocol\tnucleic acid extraction protocol',
+            'Protocol Description\tBlood was drawn.\tDNA was extracted.',
+            'Protocol Hardware\t\tQiagen kit',
+            'Comment[AEExperimentType]\tmethylation profiling by array',
+            'Comment[ArrayExpressAccession]\tE-TEST-0001',
+        ]
+    )
+    + '\n'
+)
+
+
+@pytest.fixture(scope='module')
+def idf_minimal():
+    return parse_idf(IDF_MINIMAL)
+
+
+class TestParseIdfSynthetic:
+    def test_title(self, idf_minimal):
+        assert idf_minimal['title'] == 'Test Study'
+
+    def test_description(self, idf_minimal):
+        assert idf_minimal['description'] == 'A test study for unit testing.'
+
+    def test_experimental_designs(self, idf_minimal):
+        assert idf_minimal['experimental_designs'] == ['case control design']
+
+    def test_experimental_factors(self, idf_minimal):
+        assert idf_minimal['experimental_factors'] == ['disease']
+
+    def test_sdrf_files(self, idf_minimal):
+        assert idf_minimal['sdrf_files'] == ['test.sdrf.txt']
+
+    def test_dates(self, idf_minimal):
+        assert idf_minimal['date_of_experiment'] == '2024-01-15'
+        assert idf_minimal['public_release_date'] == '2025-06-01'
+
+    def test_empty_pubmed_id_returns_empty_list(self, idf_minimal):
+        # PubMed ID row exists but has no value — should not appear in list.
+        assert idf_minimal['pubmed_ids'] == []
+
+    def test_publication_doi(self, idf_minimal):
+        assert idf_minimal['publication_dois'] == ['10.1234/test']
+
+    def test_two_protocols_parsed(self, idf_minimal):
+        assert len(idf_minimal['protocols']) == 2
+
+    def test_protocol_fields(self, idf_minimal):
+        p0 = idf_minimal['protocols'][0]
+        assert p0['name'] == 'P-001'
+        assert p0['type'] == 'sample collection protocol'
+        assert p0['description'] == 'Blood was drawn.'
+        assert p0['hardware'] == ''  # empty in the fixture
+
+    def test_protocol_hardware_positional_empty(self, idf_minimal):
+        # Protocol Hardware has an empty first value — P-001 has no hardware.
+        assert idf_minimal['protocols'][0]['hardware'] == ''
+        assert idf_minimal['protocols'][1]['hardware'] == 'Qiagen kit'
+
+    def test_one_person_parsed(self, idf_minimal):
+        assert len(idf_minimal['persons']) == 1
+
+    def test_person_fields(self, idf_minimal):
+        p = idf_minimal['persons'][0]
+        assert p['last_name'] == 'Smith'
+        assert p['first_name'] == 'Alice'
+        assert p['email'] == 'alice@example.com'
+        assert p['affiliation'] == 'Test University'
+        assert p['roles'] == 'submitter'
+
+    def test_comments_extracted(self, idf_minimal):
+        assert idf_minimal['comments']['AEExperimentType'] == 'methylation profiling by array'
+        assert idf_minimal['comments']['ArrayExpressAccession'] == 'E-TEST-0001'
+
+    def test_multiple_persons(self):
+        idf = parse_idf(
+            '\n'.join(
+                [
+                    'MAGE-TAB Version\t1.1',
+                    'Investigation Title\tMulti-person Study',
+                    'SDRF File\tstudy.sdrf.txt',
+                    'Person Last Name\tSmith\tJones',
+                    'Person First Name\tAlice\tBob',
+                    'Person Affiliation\tUni A\tUni B',
+                    'Person Roles\tsubmitter\tinvestigator',
+                ]
+            )
+            + '\n'
+        )
+        assert len(idf['persons']) == 2
+        assert idf['persons'][0]['last_name'] == 'Smith'
+        assert idf['persons'][1]['last_name'] == 'Jones'
+        assert idf['persons'][1]['affiliation'] == 'Uni B'
+
+    def test_blank_lines_ignored(self):
+        text = '\n\nInvestigation Title\tBlank Test\n\nSDRF File\tblank.sdrf.txt\n\n'
+        idf = parse_idf(text)
+        assert idf['title'] == 'Blank Test'
+        assert idf['sdrf_files'] == ['blank.sdrf.txt']
+
+
+# ---------------------------------------------------------------------------
+# E-MTAB-14823 — real-world IDF fixture
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope='module')
+def emtab14823_idf():
+    return parse_idf((FIXTURE_DIR / 'E-MTAB-14823.idf.txt').read_text())
+
+
+class TestEMTAB14823IDF:
+    def test_title(self, emtab14823_idf):
+        assert 'anorexia nervosa' in emtab14823_idf['title']
+
+    def test_experimental_factor_is_disease(self, emtab14823_idf):
+        assert emtab14823_idf['experimental_factors'] == ['disease']
+
+    def test_experimental_design(self, emtab14823_idf):
+        assert emtab14823_idf['experimental_designs'] == ['case control design']
+
+    def test_sdrf_file(self, emtab14823_idf):
+        assert emtab14823_idf['sdrf_files'] == ['E-MTAB-14823.sdrf.txt']
+
+    def test_six_protocols(self, emtab14823_idf):
+        assert len(emtab14823_idf['protocols']) == 6
+
+    def test_protocol_names(self, emtab14823_idf):
+        names = [p['name'] for p in emtab14823_idf['protocols']]
+        assert names == [
+            'P-MTAB-162815',
+            'P-MTAB-162816',
+            'P-MTAB-162817',
+            'P-MTAB-162818',
+            'P-MTAB-162819',
+            'P-MTAB-162820',
+        ]
+
+    def test_protocol_types(self, emtab14823_idf):
+        types = [p['type'] for p in emtab14823_idf['protocols']]
+        assert 'sample collection protocol' in types
+        assert 'nucleic acid extraction protocol' in types
+        assert 'normalization data transformation protocol' in types
+
+    def test_protocol_descriptions_non_empty(self, emtab14823_idf):
+        for p in emtab14823_idf['protocols']:
+            assert p['description'], f'Protocol {p["name"]} has no description'
+
+    def test_protocol_hardware_aligned(self, emtab14823_idf):
+        # First two protocols have no hardware; third onwards do.
+        assert emtab14823_idf['protocols'][0]['hardware'] == ''
+        assert emtab14823_idf['protocols'][1]['hardware'] == ''
+        assert 'MethylationEPIC' in emtab14823_idf['protocols'][2]['hardware']
+
+    def test_one_person(self, emtab14823_idf):
+        assert len(emtab14823_idf['persons']) == 1
+
+    def test_person_details(self, emtab14823_idf):
+        p = emtab14823_idf['persons'][0]
+        assert p['last_name'] == 'Palumbo'
+        assert p['first_name'] == 'Domenico'
+        assert p['affiliation'] == 'University of Salerno'
+        assert p['roles'] == 'submitter'
+
+    def test_publication_doi(self, emtab14823_idf):
+        assert '10.1007' in emtab14823_idf['publication_dois'][0]
+
+    def test_dates(self, emtab14823_idf):
+        assert emtab14823_idf['date_of_experiment'] == '2025-01-10'
+        assert emtab14823_idf['public_release_date'] == '2026-03-01'
+
+    def test_comment_experiment_type(self, emtab14823_idf):
+        assert emtab14823_idf['comments']['AEExperimentType'] == 'methylation profiling by array'
+
+    def test_comment_accession(self, emtab14823_idf):
+        assert emtab14823_idf['comments']['ArrayExpressAccession'] == 'E-MTAB-14823'

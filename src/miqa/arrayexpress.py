@@ -118,9 +118,127 @@ def get_study_metadata(accession: str) -> dict:
 
 
 # --------------------
-# SDRF metadata extraction
+# IDF + SDRF parsing
 # Spec: https://www.ebi.ac.uk/biostudies/misc/MAGE-TABv1.1_2011_07_28.pdf
 # --------------------
+
+# Protocol fields that form a parallel array (nth value of each row = nth protocol).
+_PROTOCOL_FIELDS = [
+    'Protocol Name',
+    'Protocol Type',
+    'Protocol Description',
+    'Protocol Hardware',
+    'Protocol Software',
+    'Protocol Parameters',
+    'Protocol Term Source REF',
+    'Protocol Term Accession Number',
+]
+
+# Person fields that form a parallel array.
+_PERSON_FIELDS = [
+    'Person Last Name',
+    'Person First Name',
+    'Person Mid Initials',
+    'Person Email',
+    'Person Phone',
+    'Person Fax',
+    'Person Address',
+    'Person Affiliation',
+    'Person Roles',
+]
+
+_COMMENT_RE = re.compile(r'^Comment\[(.+)\]$', re.IGNORECASE)
+
+
+def _idf_key(field: str, prefix: str) -> str:
+    """Strip *prefix* from *field* and convert to snake_case dict key."""
+    stem = field[len(prefix) :] if field.startswith(prefix) else field
+    return stem.strip().lower().replace(' ', '_')
+
+
+def _group_parallel(raw: dict[str, list[str]], fields: list[str], prefix: str) -> list[dict]:
+    """Transpose parallel IDF array rows into a list of dicts.
+
+    Uses the first field (e.g. Protocol Name / Person Last Name) as the
+    canonical length; entries whose primary key is empty are skipped.
+    """
+    primary = raw.get(fields[0], [])
+    n = len(primary)
+    result = []
+    for i in range(n):
+        if not primary[i]:
+            continue
+        entry = {}
+        for field in fields:
+            arr = raw.get(field, [])
+            entry[_idf_key(field, prefix)] = arr[i] if i < len(arr) else ''
+        result.append(entry)
+    return result
+
+
+def parse_idf(text: str) -> dict:
+    """Parse IDF (Investigation Description Format) tab-separated text.
+
+    Each non-blank line is ``Tag\\tValue1\\tValue2\\t...``. Fields that
+    represent parallel arrays (Protocol *, Person *) are transposed into
+    lists of dicts.
+
+    Returns a dict with keys:
+        title, description, experimental_designs, experimental_factors,
+        sdrf_files, date_of_experiment, public_release_date,
+        pubmed_ids, publication_dois,
+        protocols (list[dict]), persons (list[dict]),
+        comments (dict[str, str]),
+    """
+    raw: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split('\t')
+        tag = parts[0].strip()
+        if not tag:
+            continue
+        values = [v.strip() for v in parts[1:]]
+        # Strip trailing empty strings (common artefact of spreadsheet exports).
+        while values and not values[-1]:
+            values.pop()
+        # Tags should not repeat in a valid IDF, but be defensive.
+        if tag in raw:
+            raw[tag].extend(values)
+        else:
+            raw[tag] = values
+
+    def _scalar(tag: str) -> str | None:
+        non_empty = [v for v in raw.get(tag, []) if v]
+        return non_empty[0] if non_empty else None
+
+    def _list(tag: str) -> list[str]:
+        return [v for v in raw.get(tag, []) if v]
+
+    comments: dict[str, str] = {}
+    for tag, vals in raw.items():
+        m = _COMMENT_RE.match(tag)
+        if m:
+            non_empty = [v for v in vals if v]
+            if non_empty:
+                comments[m.group(1)] = non_empty[0]
+
+    return {
+        'title': _scalar('Investigation Title'),
+        'description': _scalar('Experiment Description'),
+        'experimental_designs': _list('Experimental Design'),
+        'experimental_factors': _list('Experimental Factor Name'),
+        'sdrf_files': _list('SDRF File'),
+        'date_of_experiment': _scalar('Date of Experiment'),
+        'public_release_date': _scalar('Public Release Date'),
+        'pubmed_ids': _list('PubMed ID'),
+        'publication_dois': _list('Publication DOI'),
+        'protocols': _group_parallel(raw, _PROTOCOL_FIELDS, 'Protocol '),
+        'persons': _group_parallel(raw, _PERSON_FIELDS, 'Person '),
+        'comments': comments,
+        # 'raw': raw,
+    }
+
 
 # Maps SDRF bracketed attribute names to structured DB fields.
 # Both Characteristics[] and Factor Value[] are matched against this.
@@ -216,7 +334,6 @@ app = typer.Typer(help='ArrayExpress crawler')
 
 @app.command()
 def import_one(accession: str = 'E-MTAB-14823'):
-
     from pprint import pprint
 
     # Get simple JSON info
@@ -233,7 +350,16 @@ def import_one(accession: str = 'E-MTAB-14823'):
 
 @app.command()
 def crawl():
+    from pprint import pprint
+
     studies = list_studies()
+    for study in tz.take(1, studies):
+        accn = study['accession']
+        pprint(get_study_metadata(accn))
+
+        links = StudyLinks.from_accession(accn)
+        pprint(parse_idf(httpx.get(links.idf).text))
+        pprint(parse_sdrf(httpx.get(links.sdrf).text))
 
 
 if __name__ == '__main__':
