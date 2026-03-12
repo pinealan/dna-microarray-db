@@ -1,0 +1,138 @@
+Submission	E-MTAB-14823
+Title	DNA Methylation profiles in girls with anorexia nervosa and amenorrhea: a pilot study
+ReleaseDate	2026-02-23
+RootPath	E-MTAB-14823
+AttachTo	ArrayExpress
+
+Study	s-E-MTAB-14823
+Title	DNA Methylation profiles in girls with anorexia nervosa and amenorrhea: a pilot study
+ReleaseDate	2026-02-23
+Study type	methylation profiling by array
+[Ontology]	EFO
+[TermId]	EFO_0002759
+Organism	Homo sapiens
+Description	Using the Infinium Human DNA Methylation EPIC BeadChip array (850 K), we analyzed genome-wide DNA methylation patterns in peripheral blood leukocytes collected from 10 female patients with anorexia  with primary (n= 4) or secondary (n= 6) amenorrhea and 13 healthy pubertal girls matched by age (E-MTAB-13950).
+
+Protocols[s-E-MTAB-14823]	Name	Type	[Ontology]	[TermId]	Description	Hardware	Software
+P-MTAB-162815	P-MTAB-162815	sample collection protocol	EFO	EFO_0005518	All blood samples were drawn at 8:00 a.m. from an antecubital vein, clotted, centrifuged, and serum was stored at −20 °C until analyses were performed.		
+P-MTAB-162816	P-MTAB-162816	nucleic acid extraction protocol	EFO	EFO_0002944	Genomic DNA was extracted from peripheral blood leukocytes using standard procedures.		
+P-MTAB-162817	P-MTAB-162817	nucleic acid labeling protocol	EFO	EFO_0003813	Bisulfite converted DNA (250 ng) was used for analysis of whole-genome methylation using the MethylationEPIC BeadChip (Illumina, San Diego, CA, USA).	MethylationEPIC BeadChip (Illumina, San Diego, CA, USA)	
+P-MTAB-162818	P-MTAB-162818	nucleic acid hybridization to array protocol	EFO	EFO_0003815	Bisulfite converted DNA was whole-genome amplified for 20 h followed by end-point fragmentation. Fragmented DNA was precipitated, denatured and hybridized to the BeadChips for 20 h at 48 °C.	MethylationEPIC BeadChip (Illumina, San Diego, CA, USA)	
+P-MTAB-162819	P-MTAB-162819	array scanning and feature extraction protocol	EFO	EFO_0003814	The BeadChips were washed and the hybridized primers were extended and labeled before scanning the BeadChips using the Illumina iScan system.	Illumina iScan	
+P-MTAB-162820	P-MTAB-162820	normalization data transformation protocol	EFO	EFO_0003816	CpGs beta values were obtained using ChAMP on R (v. 4.2.0).	Dell PRECISION T7500	R
+
+Author		s-E-MTAB-14823
+Name	Domenico Palumbo
+Email	domenico.palumbo89@gmail.com
+Role	submitter
+<affiliation>	o1
+
+Organization	o1	s-E-MTAB-14823
+Name	University of Salerno
+Address	Via S. Allende, Baronissi, (SA), Italy
+
+Publication		s-E-MTAB-14823
+Title	DNA methylation changes in young female adolescents with anorexia nervosa : focus on puberty related genes
+Authors	Stefania Palumbo, Domenico Palumbo, Grazia Cirillo, Francesca Aiello, Giuseppina, Rosaria Umano, Maria Gloria Gleijeses, Emanuele Miraglia del Giudice, Marco Carotenuto, Filomena Salerno, Anna Grandone
+DOI	10.1007/s40618-026-02830-6
+
+Samples	s-samples-factors-E-MTAB-14823	s-E-MTAB-14823
+Sample count	10
+Experimental Designs	case control design
+[Ontology]	EFO
+[TermId]	EFO:0001427
+Experimental Factors	disease
+[TermName]	disease
+
+Experimental Factors	exp_factor-E-MTAB-14823	s-samples-factors-E-MTAB-14823
+Disease	primary amenorrhea
+Disease	secondary amenorrhea
+
+Factors Table[exp_factor-E-MTAB-14823]	disease	No. of Samples	[search]
+factors_0	secondary amenorrhea	6	"205848680142_R08C01_Grn.idat" OR "205848680142_R08C01_Red.idat" OR "205848680087_R01C01_Grn.idat" OR "205848680087_R01C01_Red.idat" OR "205848680087_R08C01_Grn.idat" OR "205848680087_R08C01_Red.idat" OR "205848690004_R02C01_Grn.idat" OR "205848690004_R02C01_Red.idat" OR "205848680087_R02C01_Grn.idat" OR "205848680087_R02C01_Red.idat" OR "205848680087_R03C01_Grn.idat" OR "205848680087_R03C01_Red.idat"
+factors_1	primary amenorrhea	4	"205848680087_R04C01_Grn.idat" OR "205848680087_R04C01_Red.idat" OR "205848680087_R05C01_Grn.idat" OR "205848680087_R05C01_Red.idat" OR "205848680087_R06C01_Grn.idat" OR "205848680087_R06C01_Red.idat" OR "205848680087_R07C01_Grn.idat" OR "205848680087_R07C01_Red.idat"
+
+Source Characteristics	source_chars-E-MTAB-14823	s-samples-factors-E-MTAB-14823
+Organism	Homo sapiens
+Developmental stage	adolescent
+Sex	female
+Organism part	blood
+Phenotype	amenorrhea
+Age	13.64 year
+Age	13.25 year
+Age	11.23 year
+Age	16 year
+Age	14.12 year
+Age	11.15 year
+Age	14.33 year
+Age	11.29 year
+Age	15.24 year
+Disease	primary amenorrhea
+Disease	secondary amenorrhea
+Individual	1
+Individual	10
+Individual	11
+Individual	... 7 other values
+
+Characteristics Table[source_chars-E-MTAB-14823]	age	disease	No. of Samples	[search]
+source_0	16 year	secondary amenorrhea	2	"205848680142_R08C01_Grn.idat" OR "205848680142_R08C01_Red.idat" OR "205848690004_R02C01_Grn.idat" OR "205848690004_R02C01_Red.idat"
+source_1	13.25 year	primary amenorrhea	1	"205848680087_R04C01_Grn.idat" OR "205848680087_R04C01_Red.idat"
+source_2	11.15 year	primary amenorrhea	1	"205848680087_R05C01_Grn.idat" OR "205848680087_R05C01_Red.idat"
+source_3	11.29 year	primary amenorrhea	1	"205848680087_R06C01_Grn.idat" OR "205848680087_R06C01_Red.idat"
+source_4	14.12 year	secondary amenorrhea	1	"205848680087_R01C01_Grn.idat" OR "205848680087_R01C01_Red.idat"
+source_5	11.23 year	primary amenorrhea	1	"205848680087_R07C01_Grn.idat" OR "205848680087_R07C01_Red.idat"
+source_6	13.64 year	secondary amenorrhea	1	"205848680087_R08C01_Grn.idat" OR "205848680087_R08C01_Red.idat"
+source_7	14.33 year	secondary amenorrhea	1	"205848680087_R02C01_Grn.idat" OR "205848680087_R02C01_Red.idat"
+source_8	15.24 year	secondary amenorrhea	1	"205848680087_R03C01_Grn.idat" OR "205848680087_R03C01_Red.idat"
+
+Assays and Data	s-assays-data-E-MTAB-14823	s-E-MTAB-14823
+Assay count	20
+Technology	Array assay
+Assay by Molecule	DNA assay
+
+Raw Data	raw-data	s-assays-data-E-MTAB-14823
+
+Files	Samples	Description
+205848680142_R08C01_Grn.idat	DCA_1	Raw data file
+205848680142_R08C01_Red.idat	DCA_1	Raw data file
+205848680087_R04C01_Grn.idat	DCA_10	Raw data file
+205848680087_R04C01_Red.idat	DCA_10	Raw data file
+205848680087_R05C01_Grn.idat	DCA_11	Raw data file
+205848680087_R05C01_Red.idat	DCA_11	Raw data file
+205848680087_R06C01_Grn.idat	DCA_49	Raw data file
+205848680087_R06C01_Red.idat	DCA_49	Raw data file
+205848680087_R01C01_Grn.idat	DCA_5	Raw data file
+205848680087_R01C01_Red.idat	DCA_5	Raw data file
+205848680087_R07C01_Grn.idat	DCA_50	Raw data file
+205848680087_R07C01_Red.idat	DCA_50	Raw data file
+205848680087_R08C01_Grn.idat	DCA_55	Raw data file
+205848680087_R08C01_Red.idat	DCA_55	Raw data file
+205848690004_R02C01_Grn.idat	DCA_56	Raw data file
+205848690004_R02C01_Red.idat	DCA_56	Raw data file
+205848680087_R02C01_Grn.idat	DCA_8	Raw data file
+205848680087_R02C01_Red.idat	DCA_8	Raw data file
+205848680087_R03C01_Grn.idat	DCA_9	Raw data file
+205848680087_R03C01_Red.idat	DCA_9	Raw data file
+
+Processed Data	processed-data	s-assays-data-E-MTAB-14823
+
+Files	Description
+Normalized_betavalues.txt	Processed Data
+
+MAGE-TAB Files	mt-E-MTAB-14823	s-assays-data-E-MTAB-14823
+
+Files	Type	Format	Description
+E-MTAB-14823.idf.txt	IDF File	tab-delimited text	Investigation Design Format (IDF)
+E-MTAB-14823.sdrf.txt	SDRF File	tab-delimited text	Sample and Data Relationship Format (SDRF)
+
+Array Designs	ad-E-MTAB-14823	s-assays-data-E-MTAB-14823
+
+Links	Type
+A-GEOD-21145	Array Design
+
+MIAME Score	score-E-MTAB-14823	s-E-MTAB-14823
+Platforms	-
+Protocols	*
+Variables	*
+Processed	*
+Raw	*

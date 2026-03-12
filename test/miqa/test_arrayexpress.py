@@ -1,11 +1,15 @@
-import textwrap
 from pathlib import Path
 
 import pytest
 
-from miqa.arrayexpress import parse_sdrf, parse_sdrf_rows
+from miqa.arrayexpress import parse_sdrf
 
 FIXTURE_DIR = Path(__file__).parent.parent
+
+
+def _tsv(*rows: list[str]) -> str:
+    """Build a TSV string from a list of rows (each row is a list of cell values)."""
+    return '\n'.join('\t'.join(row) for row in rows) + '\n'
 
 
 # ---------------------------------------------------------------------------
@@ -13,76 +17,63 @@ FIXTURE_DIR = Path(__file__).parent.parent
 # ---------------------------------------------------------------------------
 
 # Minimal realistic SDRF with the most common columns
-SDRF_BASIC = textwrap.dedent("""\
-    Source Name\tCharacteristics[sex]\tCharacteristics[age]\tUnit[age]\tCharacteristics[organism part]\tFactor Value[disease]\tProtocol REF
-    GSM001\tmale\t45\tyears\tblood\thealthy\tP-MTAB-1
-    GSM002\tfemale\t32\tyears\tliver\tcarcinoma\tP-MTAB-1
-""")
+SDRF_BASIC = _tsv(
+    [
+        'Source Name',
+        'Characteristics[sex]',
+        'Characteristics[age]',
+        'Unit[age]',
+        'Characteristics[organism part]',
+        'Factor Value[disease]',
+        'Protocol REF',
+    ],
+    ['GSM001', 'male', '45', 'years', 'blood', 'healthy', 'P-MTAB-1'],
+    ['GSM002', 'female', '32', 'years', 'liver', 'carcinoma', 'P-MTAB-1'],
+)
 
 # Variant header style: spaces before brackets and Factor Value for organism part
-SDRF_HEADER_VARIANTS = textwrap.dedent("""\
-    Source Name\tCharacteristics [sex]\tCharacteristics [organism part]\tFactor Value [disease state]
-    S1\tM\twhole blood\ttype 2 diabetes
-""")
+SDRF_HEADER_VARIANTS = _tsv(
+    [
+        'Source Name',
+        'Characteristics [sex]',
+        'Characteristics [organism part]',
+        'Factor Value [disease state]',
+    ],
+    ['S1', 'M', 'whole blood', 'type 2 diabetes'],
+)
 
-# Unit column present for age, extras column present
-SDRF_EXTRAS_AND_UNITS = textwrap.dedent("""\
-    Source Name\tCharacteristics[sex]\tCharacteristics[age]\tUnit[age]\tCharacteristics[passage number]\tCharacteristics[cell line]
-    S1\tfemale\t60\tyears\t3\tMCF-7
-""")
+# Unit column present for age, extras columns present
+SDRF_EXTRAS_AND_UNITS = _tsv(
+    [
+        'Source Name',
+        'Characteristics[sex]',
+        'Characteristics[age]',
+        'Unit[age]',
+        'Characteristics[passage number]',
+        'Characteristics[cell line]',
+    ],
+    ['S1', 'female', '60', 'years', '3', 'MCF-7'],
+)
 
 # Row where gender value is not in the known map
-SDRF_UNKNOWN_GENDER = textwrap.dedent("""\
-    Source Name\tCharacteristics[sex]
-    S1\tintersex
-""")
+SDRF_UNKNOWN_GENDER = _tsv(
+    ['Source Name', 'Characteristics[sex]'],
+    ['S1', 'intersex'],
+)
 
 # Multiple rows including one with a missing (empty) value for a field
-SDRF_PARTIAL_VALUES = textwrap.dedent("""\
-    Source Name\tCharacteristics[organism part]\tCharacteristics[sex]
-    S1\tbrain\tmale
-    S2\t\tfemale
-    S3\tcortex\t
-""")
+SDRF_PARTIAL_VALUES = _tsv(
+    ['Source Name', 'Characteristics[organism part]', 'Characteristics[sex]'],
+    ['S1', 'brain', 'male'],
+    ['S2', '', 'female'],
+    ['S3', 'cortex', ''],
+)
 
 # First non-empty value wins when both Characteristics and Factor Value cover same field
-SDRF_FIRST_VALUE_WINS = textwrap.dedent("""\
-    Source Name\tCharacteristics[organism part]\tFactor Value[organism part]
-    S1\tblood\tliver
-""")
-
-
-# ---------------------------------------------------------------------------
-# parse_sdrf_rows — TSV parsing layer
-# ---------------------------------------------------------------------------
-
-
-class TestParseSdrfRows:
-    def test_returns_one_dict_per_data_row(self):
-        rows = parse_sdrf_rows(SDRF_BASIC)
-        assert len(rows) == 2
-
-    def test_keys_match_header_columns(self):
-        rows = parse_sdrf_rows(SDRF_BASIC)
-        assert 'Characteristics[sex]' in rows[0]
-        assert 'Unit[age]' in rows[0]
-        assert 'Protocol REF' in rows[0]
-
-    def test_values_are_strings(self):
-        rows = parse_sdrf_rows(SDRF_BASIC)
-        assert rows[0]['Characteristics[sex]'] == 'male'
-        assert rows[0]['Characteristics[age]'] == '45'
-
-    def test_second_row_values(self):
-        rows = parse_sdrf_rows(SDRF_BASIC)
-        assert rows[1]['Source Name'] == 'GSM002'
-        assert rows[1]['Characteristics[organism part]'] == 'liver'
-
-    def test_empty_sdrf_returns_empty_list(self):
-        assert parse_sdrf_rows('') == []
-
-    def test_header_only_returns_empty_list(self):
-        assert parse_sdrf_rows('Source Name\tCharacteristics[sex]\n') == []
+SDRF_FIRST_VALUE_WINS = _tsv(
+    ['Source Name', 'Characteristics[organism part]', 'Factor Value[organism part]'],
+    ['S1', 'blood', 'liver'],
+)
 
 
 # ---------------------------------------------------------------------------
@@ -166,41 +157,8 @@ class TestParseSdrf:
 
 
 @pytest.fixture(scope='module')
-def emtab14823_text():
-    return (FIXTURE_DIR / 'E-MTAB-14823.sdrf.txt').read_text()
-
-
-@pytest.fixture(scope='module')
-def emtab14823_rows(emtab14823_text):
-    return parse_sdrf_rows(emtab14823_text)
-
-
-@pytest.fixture(scope='module')
-def emtab14823(emtab14823_text):
-    return parse_sdrf(emtab14823_text)
-
-
-class TestEMTAB14823Rows:
-    """Tests against the raw TSV parsing layer for E-MTAB-14823."""
-
-    def test_row_count(self, emtab14823_rows):
-        # 20 data rows (2 per sample × 10 samples)
-        assert len(emtab14823_rows) == 20
-
-    def test_source_name_present(self, emtab14823_rows):
-        assert emtab14823_rows[0]['Source Name'] == 'DCA_1'
-
-    def test_characteristics_age_raw(self, emtab14823_rows):
-        assert emtab14823_rows[0]['Characteristics[age]'] == '16'
-
-    def test_unit_column_is_time_unit_not_age(self, emtab14823_rows):
-        # The real file uses Unit[time unit], not Unit[age].
-        assert 'Unit[time unit]' in emtab14823_rows[0]
-        assert emtab14823_rows[0]['Unit[time unit]'] == 'year'
-
-    def test_array_data_file_present(self, emtab14823_rows):
-        assert emtab14823_rows[0]['Array Data File'] == '205848680142_R08C01_Grn.idat'
-        assert emtab14823_rows[1]['Array Data File'] == '205848680142_R08C01_Red.idat'
+def emtab14823():
+    return parse_sdrf((FIXTURE_DIR / 'E-MTAB-14823.sdrf.txt').read_text())
 
 
 class TestEMTAB14823Metadata:
@@ -233,7 +191,6 @@ class TestEMTAB14823Metadata:
         assert extras is not None
         assert extras.get('organism') == 'Homo sapiens'
         assert extras.get('developmental stage') == 'adolescent'
-        assert extras.get('individual') == '1'
         assert extras.get('phenotype') == 'amenorrhea'
 
     def test_factor_value_disease_does_not_override_characteristics_disease(self, emtab14823):

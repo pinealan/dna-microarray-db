@@ -54,7 +54,9 @@ class TestMatchValueRegex:
 
     def test_alternation(self):
         assert match_value('pbmc', r'pbmc|peripheral blood mononuclear', 'regex')
-        assert match_value('peripheral blood mononuclear cells', r'pbmc|peripheral blood mononuclear', 'regex')
+        assert match_value(
+            'peripheral blood mononuclear cells', r'pbmc|peripheral blood mononuclear', 'regex'
+        )
 
     def test_case_insensitive(self):
         assert match_value('PBMC', r'pbmc', 'regex')
@@ -136,36 +138,43 @@ def _make_rules(*specs):
 
 
 class TestApplyRulesToSample:
-    def test_structured_field_match(self):
-        sample = {'tissue': 'whole blood', 'extras': {}}
+    def test_source_metadata_field_match(self):
+        sample = {'source_metadata': {'tissue': 'whole blood'}}
         rules = _make_rules(('tissue', 'blood', 'substring', 'tissue', 'blood', 0))
         changes = apply_rules_to_sample(sample, rules)
         assert changes == {'tissue': 'blood'}
 
-    def test_extras_field_match(self):
-        sample = {'tissue': None, 'extras': {'cell type': 'PBMC'}}
+    def test_source_metadata_arbitrary_key_match(self):
+        # Any key in source_metadata can be a source_attribute — no fixed column list.
+        sample = {'source_metadata': {'cell type': 'PBMC'}}
         rules = _make_rules(('cell type', 'pbmc', 'substring', 'tissue', 'blood', 0))
         changes = apply_rules_to_sample(sample, rules)
         assert changes == {'tissue': 'blood'}
 
     def test_no_match_returns_empty(self):
-        sample = {'tissue': 'liver', 'extras': {}}
+        sample = {'source_metadata': {'tissue': 'liver'}}
         rules = _make_rules(('tissue', 'blood', 'substring', 'tissue', 'blood', 0))
         changes = apply_rules_to_sample(sample, rules)
         assert changes == {}
 
-    def test_missing_source_value_skipped(self):
-        sample = {'tissue': None, 'extras': {}}
+    def test_missing_source_key_skipped(self):
+        sample = {'source_metadata': {}}
+        rules = _make_rules(('tissue', 'blood', 'substring', 'tissue', 'blood', 0))
+        assert apply_rules_to_sample(sample, rules) == {}
+
+    def test_missing_source_metadata_skipped(self):
+        # Sample with no source_metadata key at all should not raise.
+        sample = {}
         rules = _make_rules(('tissue', 'blood', 'substring', 'tissue', 'blood', 0))
         assert apply_rules_to_sample(sample, rules) == {}
 
     def test_empty_string_source_skipped(self):
-        sample = {'tissue': '', 'extras': {}}
+        sample = {'source_metadata': {'tissue': ''}}
         rules = _make_rules(('tissue', '', 'substring', 'tissue', 'blood', 0))
         assert apply_rules_to_sample(sample, rules) == {}
 
     def test_priority_sorting_applied(self):
-        sample = {'tissue': 'whole blood'}
+        sample = {'source_metadata': {'tissue': 'whole blood'}}
         rules = _make_rules(
             ('tissue', 'blood', 'substring', 'tissue', 'low', 0),
             ('tissue', 'blood', 'substring', 'tissue', 'high', 10),
@@ -174,26 +183,20 @@ class TestApplyRulesToSample:
         assert changes == {'tissue': 'high'}
 
     def test_gender_value_passed_through(self):
-        # apply_rules_to_sample doesn't cast — server.py handles ::gender cast.
-        sample = {'gender': 'M', 'extras': {}}
+        # No enum cast needed — normalised_metadata is plain jsonb.
+        sample = {'source_metadata': {'gender': 'M'}}
         rules = _make_rules(('gender', '^m', 'regex', 'gender', 'male', 0))
         changes = apply_rules_to_sample(sample, rules)
         assert changes == {'gender': 'male'}
 
     def test_multiple_source_attributes(self):
-        sample = {'tissue': 'blood', 'disease': 'type 2 diabetes', 'extras': {}}
+        sample = {'source_metadata': {'tissue': 'blood', 'disease': 'type 2 diabetes'}}
         rules = _make_rules(
             ('tissue', 'blood', 'substring', 'tissue', 'blood', 0),
             ('disease', 'diabetes', 'substring', 'disease', 'diabetes mellitus', 0),
         )
         changes = apply_rules_to_sample(sample, rules)
         assert changes == {'tissue': 'blood', 'disease': 'diabetes mellitus'}
-
-    def test_no_extras_key_missing(self):
-        # Sample with no 'extras' key at all should not raise.
-        sample = {'tissue': 'blood'}
-        rules = _make_rules(('cell type', 'pbmc', 'substring', 'tissue', 'blood', 0))
-        assert apply_rules_to_sample(sample, rules) == {}
 
     def test_structured_fields_constant(self):
         assert 'tissue' in STRUCTURED_FIELDS

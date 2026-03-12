@@ -5,29 +5,32 @@ ArrayExpress (by BioStudies) repository data retrieval utilities.
 import csv
 import logging
 import re
-import tempfile
 from dataclasses import dataclass
 from io import StringIO
-from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Self
 
 import httpx
 import toolz as tz
+import typer
 
-from miqa.utils import guess_idat_channel, streamed_download
-
-
-logger = logging.getLogger()
+from miqa.error import MiqaError
 
 
 BASE_FTP = 'https://ftp.ebi.ac.uk/biostudies/fire'
 STUDY_BASE = 'https://www.ebi.ac.uk/biostudies/api/v1/studies'
 SEARCH_BASE = 'https://www.ebi.ac.uk/biostudies/api/v1/arrayexpress/search'
 
+logger = logging.getLogger(__spec__.name)
+
+
+class AEError(MiqaError):
+    """GEO related exceptions."""
+
+    pass
+
 
 def list_studies(page_size: int = 100) -> Iterator[dict]:
     """Return all studies matching methylation-by-array + idat filter, paginating as needed."""
-    hits = []
     page = 1
     while True:
         res = httpx.get(
@@ -64,47 +67,59 @@ class StudyLinks:
         """
         return self.root + '/Files/' + filename
 
-
-def get_study_links(accession: str) -> StudyLinks:
-    study = httpx.get(f'{STUDY_BASE}/{accession}/info').json()
-    return StudyLinks(
-        root=study['httpLink'],
-        idf=study['httpLink'] + f'/Files/{accession}.idf.txt',
-        sdrf=study['httpLink'] + f'/Files/{accession}.sdrf.txt',
-        pagetab_json=study['httpLink'] + f'/{accession}.json',
-        pagetab_tsv=study['httpLink'] + f'/{accession}.json',
-    )
-
-
-def study_details(accession: str) -> dict:
-    resp = httpx.get(f'{STUDY_BASE}/{accession}').json()
-
-    info = {
-        'accession': accession,
-        'metadata': lift_attrs(tz.dissoc(resp, 'section')),
-        'ftp_dir': httpx.get(f'{STUDY_BASE}/{accession}/info').json().get('ftpLink'),
-    }
-    section = resp.get('section', {})
-    if section:
-        info |= attrs_to_dict(section.get('attributes', []))
-        info['child_items'] = {
-            s.get('accno'): lift_attrs(s)
-            for s in section.get('subsections', [])
-            if isinstance(s, dict)
-        }
-    return info
+    @classmethod
+    def from_accession(cls, accession: str) -> Self:
+        study = httpx.get(f'{STUDY_BASE}/{accession}/info').json()
+        return cls(
+            root=study['httpLink'],
+            idf=study['httpLink'] + f'/Files/{accession}.idf.txt',
+            sdrf=study['httpLink'] + f'/Files/{accession}.sdrf.txt',
+            pagetab_json=study['httpLink'] + f'/{accession}.json',
+            pagetab_tsv=study['httpLink'] + f'/{accession}.json',
+        )
 
 
-def lift_attrs(item: dict) -> dict:
-    return tz.dissoc(item, 'attributes') | attrs_to_dict(item.get('attributes', []))
-
-
-def attrs_to_dict(attrs: list[dict]) -> dict:
+def _attrs_to_dict(attrs: list[dict]) -> dict:
     return {attr['name']: attr['value'] for attr in attrs if 'name' in attr and 'value' in attr}
+
+
+def _parse_entity(node: dict) -> dict:
+    if 'accno' in node:
+        val = _attrs_to_dict(node.get('attributes', {}))
+        val['node_type'] = node['type']
+        return {node['accno']: val}
+    else:
+        return {
+            node['type']: _attrs_to_dict(node.get('attributes', {})),
+        }
+
+
+def _walk_page_tab_json(node) -> Iterator[dict]:
+    if isinstance(node, list):
+        for n in node:
+            yield from _walk_page_tab_json(n)
+    elif isinstance(node, dict):
+        yield _parse_entity(node)
+        if 'subsections' in node:
+            for n in node['subsections']:
+                yield from _walk_page_tab_json(n)
+    else:
+        raise AEError('Unexpected node in page-tab json')
+
+
+def get_study_metadata(accession: str) -> dict:
+    """Parse a Page-TAB json into usable info."""
+    resp = httpx.get(f'{STUDY_BASE}/{accession}').json()
+    info = _attrs_to_dict(resp.get('attributes', []))
+
+    # Walk the Page-tab JSON and extract all entities to top level, keyed by ID
+    entities = tz.merge(*list(_walk_page_tab_json(resp['section'])))
+    return info | {'entities': entities}
 
 
 # --------------------
 # SDRF metadata extraction
+# Spec: https://www.ebi.ac.uk/biostudies/misc/MAGE-TABv1.1_2011_07_28.pdf
 # --------------------
 
 # Maps SDRF bracketed attribute names to structured DB fields.
@@ -134,7 +149,7 @@ _VALUE_PREFIXES = frozenset(['characteristics', 'factor value'])
 def _parse_sdrf_col(col: str) -> tuple[str, str | None]:
     """Return (prefix, attribute) for an SDRF column name.
 
-    Handles optional space before '[': 'Characteristics [age]' and
+    Handles optional space before '[]': 'Characteristics [age]' and
     'Characteristics[age]' are both parsed as ('characteristics', 'age').
     """
     m = re.match(r'^(.+?)\s*\[(.+)\]$', col.strip())
@@ -187,54 +202,42 @@ def extract_sdrf_metadata(row: dict) -> dict[str, Any]:
     return structured
 
 
-def parse_sdrf_rows(text: str) -> list[dict]:
-    """Parse raw SDRF TSV text into a list of row dicts (column name → raw value)."""
-    return list(csv.DictReader(StringIO(text), delimiter='\t'))
-
-
 def parse_sdrf(text: str) -> list[dict]:
     """Parse SDRF TSV text and extract structured metadata from every row."""
-    return [extract_sdrf_metadata(row) for row in parse_sdrf_rows(text)]
+    return [extract_sdrf_metadata(row) for row in csv.DictReader(StringIO(text), delimiter='\t')]
 
 
 # --------------------
 # Study file downloader / crawler
 # --------------------
 
+app = typer.Typer(help='ArrayExpress crawler')
+
+
+@app.command()
+def import_one(accession: str = 'E-MTAB-14823'):
+
+    from pprint import pprint
+
+    # Get simple JSON info
+    study_links = StudyLinks.from_accession(accession)
+    pprint(list(csv.DictReader(StringIO(httpx.get(study_links.sdrf).text), delimiter='\t')))
+
+    study_details = get_study_metadata(accession)
+    pprint(study_details)
+
+    # print(httpx.get(study_links.idf).text)
+    # print(httpx.get(study_links.sdrf).text)
+    # pprint(parse_sdrf(httpx.get(study_links.sdrf).text))
+
+
+@app.command()
+def crawl():
+    studies = list_studies()
+
 
 if __name__ == '__main__':
-    import json
-    from ftplib import FTP
-    from pprint import pprint
-    from urllib.parse import urlparse
-
     from miqa.utils import setup_logging
 
     setup_logging()
-
-    studies = list_studies()
-    # study_brief = next(studies)
-    # pprint(study_brief)
-    # accession = study_brief['accession']
-    # accession = 'E-MTAB-14823'
-    # study = study_details(accession)
-    # pprint(study)
-
-    ## Get raw PageTab JSON
-    # print(json.dumps(httpx.get(f'{STUDY_BASE}/{accession}').json()))
-
-    # Inspect out PageTab JSON and see if it is worth parsing
-    # study = json.load(open('e-mtab-14823.json'))
-    # pprint(study)
-    # pprint(study.keys())
-
-    # Get simple JSON info
-    for study_brief in tz.take(5, studies):
-        accession = study_brief['accession']
-        study_links = get_study_links(accession)
-        print(httpx.get(study_links.idf).text)
-        print(httpx.get(study_links.sdrf).text)
-        # study = httpx.get(f'{STUDY_BASE}/{accession}/info').json()
-        # uri = urlparse(study['httpLink'])
-        # res = httpx.get(study['httpLink'] + '/Files/')
-        # pprint(res.text)
+    app()
