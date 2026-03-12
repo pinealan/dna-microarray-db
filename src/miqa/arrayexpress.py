@@ -3,6 +3,7 @@ ArrayExpress (by BioStudies) repository data retrieval utilities.
 """
 
 import csv
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -10,9 +11,11 @@ from io import StringIO
 from typing import Any, Iterator, Self
 
 import httpx
+import psycopg
 import toolz as tz
 import typer
 
+from miqa import db
 from miqa.error import MiqaError
 
 
@@ -329,6 +332,33 @@ def parse_sdrf(text: str) -> list[dict]:
 # Study file downloader / crawler
 # --------------------
 
+
+def upsert_sample(
+    sample_id: str,
+    series_id: str,
+    source_metadata: dict,
+    conn: psycopg.Connection,
+) -> int:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO sample (
+                repository_id, repository_sample_id, repository_series_id,
+                source_metadata, normalised_metadata
+            ) VALUES ('ae', %s, %s, %s, NULL)
+            ON CONFLICT (repository_id, repository_sample_id) DO UPDATE
+            SET source_metadata = EXCLUDED.source_metadata,
+                repository_series_id = EXCLUDED.repository_series_id
+            RETURNING id
+            """,
+            (sample_id, series_id, json.dumps(source_metadata)),
+        )
+        if (res := cur.fetchone()) is not None:
+            return res[0]
+
+        raise db.DBError('Could not upsert row')
+
+
 app = typer.Typer(help='ArrayExpress crawler')
 
 
@@ -349,17 +379,47 @@ def import_one(accession: str = 'E-MTAB-14823'):
 
 
 @app.command()
-def crawl():
-    from pprint import pprint
+def crawl(skip_seen: bool = True):
+    import miqa.config as config
 
-    studies = list_studies()
-    for study in tz.take(1, studies):
-        accn = study['accession']
-        pprint(get_study_metadata(accn))
+    conn = psycopg.connect(config.DATABASE_URL, autocommit=True)
+    cnt = 0
 
-        links = StudyLinks.from_accession(accn)
-        pprint(parse_idf(httpx.get(links.idf).text))
-        pprint(parse_sdrf(httpx.get(links.sdrf).text))
+    for study_hit in list_studies():
+        accession = study_hit.get('accession')
+        if not accession:
+            continue
+
+        try:
+            links = StudyLinks.from_accession(accession)
+            idf_text = httpx.get(links.idf).text
+            sdrf_text = httpx.get(links.sdrf).text
+        except Exception:
+            logger.exception(f'Failed to fetch study files for {accession}')
+            continue
+
+        study_metadata = parse_idf(idf_text)
+
+        for raw_row in csv.DictReader(StringIO(sdrf_text), delimiter='\t'):
+            source_name = raw_row.get('Source Name', '').strip()
+            if not source_name:
+                continue
+
+            # Prefix with accession to ensure global uniqueness across studies.
+            sample_key = f'{accession}/{source_name}'
+            if skip_seen and db.seen_sample(conn, 'ae', sample_key):
+                continue
+
+            source_metadata = study_metadata | extract_sdrf_metadata(raw_row)
+
+            try:
+                db_id = upsert_sample(sample_key, accession, source_metadata, conn)
+                logger.info(f'[{cnt}] {sample_key} → db_id={db_id}')
+                cnt += 1
+            except Exception:
+                logger.exception(f'Failed to insert {sample_key=}')
+
+    logger.info(f'Crawl complete: {cnt} samples inserted/updated')
 
 
 if __name__ == '__main__':
