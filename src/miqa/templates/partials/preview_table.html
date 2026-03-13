@@ -24,7 +24,7 @@
       <td>{{ row.raw_value }}</td>
       <td>
         {% if row.matched_rule %}
-          <span class="badge">#{{ row.matched_rule.id }}</span>
+          <span class="badge">#{{ row.matched_rule.rule_id }}</span>
         {% else %}
           <span class="no-match">none</span>
         {% endif %}
