@@ -164,6 +164,16 @@ def preview():
     )
 
 
+@app.get('/samples/random')
+def random_samples():
+    n = min(int(request.args.get('n', 20)), 200)
+    with get_conn() as conn:
+        rows = conn.execute(
+            'SELECT repository_sample_id FROM sample ORDER BY random() LIMIT %s', (n,)
+        ).fetchall()
+    return jsonify([r[0] for r in rows])
+
+
 @app.get('/sample/inspect')
 def sample_inspect():
     sample_id = request.args.get('id', '').strip()

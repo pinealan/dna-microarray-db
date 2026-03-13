@@ -82,18 +82,31 @@
           <option value="series_design" {% if preview_source == 'series_design' %}selected{% endif %}>design</option>
         </select>
       </div>
-      <div style="flex:1;min-width:200px;">
+      <div style="flex:1;min-width:200px;" x-data="{
+        randomise() {
+          fetch('/samples/random?n=30')
+            .then(r => r.json())
+            .then(ids => {
+              $refs.idsInput.value = ids.join(', ');
+              $refs.idsInput.dispatchEvent(new Event('change'));
+            });
+        }
+      }">
         <label style="font-size:0.8rem;color:#555;display:block;">Filter by sample IDs (comma-separated)</label>
-        <input
-          type="text"
-          name="ids"
-          placeholder="e.g. GSM123456, GSM789012"
-          hx-get="/preview"
-          hx-trigger="input delay:400ms, change"
-          hx-target="#preview-table"
-          hx-swap="innerHTML"
-          hx-include="#preview-controls"
-        />
+        <div style="display:flex;gap:0.4rem;">
+          <input
+            type="text"
+            name="ids"
+            placeholder="e.g. GSM123456, GSM789012"
+            hx-get="/preview"
+            hx-trigger="input delay:400ms, change"
+            hx-target="#preview-table"
+            hx-swap="innerHTML"
+            hx-include="#preview-controls"
+            x-ref="idsInput"
+          />
+          <button type="button" @click="randomise()" style="white-space:nowrap;">Random</button>
+        </div>
       </div>
     </div>
 
