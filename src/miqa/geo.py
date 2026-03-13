@@ -283,27 +283,17 @@ def join_series_sample_attrs(sample: dict, series: dict) -> dict:
     }
 
 
-_CHAR_PATTERNS: list[tuple[str, str]] = [
-    # Each tuple is (Regex pattern, Attribute name)
-    (r'tissue\s*:', 'tissue'),
-    (r'tissue type\s*:', 'tissue'),
-    (r'source tissue\s*:', 'tissue'),
-    (r'cell type\s*:', 'tissue'),
-    (r'disease\s*:', 'disease'),
-    (r'disease state\s*:', 'disease'),
-    (r'diagnosis\s*:', 'disease'),
-    (r'gender\s*:', 'gender'),
-    (r'sex\s*:', 'gender'),
-    (r'age\s*:', 'age'),
-    (r'age at diagnosis\s*:', 'age'),
-]
-
-_GENDER_MAP = {
-    'male': 'male',
-    'm': 'male',
-    'female': 'female',
-    'f': 'female',
-}
+def lift_characteristics(sample: dict) -> dict:
+    """Lift the characteristics fields onto top-level of the sample dict."""
+    if chars := sample.get('characteristics_ch1'):
+        if isinstance(chars, list):
+            for line in chars:
+                attr_name, attr_val = line.split(':', maxsplit=1)
+                sample[attr_name.strip()] = attr_val.strip()
+        elif isinstance(chars, str):
+            attr_name, attr_val = chars.split(':', maxsplit=1)
+            sample[attr_name.strip()] = attr_val.strip()
+    return sample
 
 
 # --------------------
@@ -330,7 +320,7 @@ def upsert_sample(sample, series, conn):
                 sample['entity_id'],
                 series['entity_id'],
                 sample['platform_id'],
-                json.dumps(join_series_sample_attrs(sample, series)),
+                json.dumps(join_series_sample_attrs(lift_characteristics(sample), series)),
                 None,  # TODO: Do we normalise metadata right away?
             ),
         )
@@ -468,6 +458,52 @@ def crawl(
                         logger.info(f'Downloaded {sample_id=} idat files')
                     else:
                         logger.info(f'Failed to download {sample_id=} idat files')
+
+
+@app.command()
+def backfill_characteristics(batch_size: int = 500):
+    """Re-apply flatten_characteristics to all GEO samples already in the DB.
+
+    Samples imported before flatten_characteristics was introduced store
+    characteristics_ch1 as a raw list.  This command lifts those key:value
+    entries to top-level keys in source_metadata, matching what new imports do.
+    Safe to re-run: the operation is idempotent.
+
+    Rows are streamed from the database in batches of --batch-size to avoid
+    loading the full result set into memory.
+    """
+    import miqa.config as config
+
+    conn = psycopg.connect(config.DATABASE_URL)
+
+    with conn.cursor(name='backfill_cur') as cur:
+        cur.itersize = batch_size
+        cur.execute(
+            'SELECT id, repository_sample_id, source_metadata'
+            ' FROM sample'
+            " WHERE repository_id = 'geo'"
+            "   AND source_metadata ? 'characteristics_ch1'"
+        )
+
+        updated = errors = 0
+        for db_id, repo_sample_id, source_metadata in cur:
+            try:
+                flattened = lift_characteristics(source_metadata)
+            except Exception:
+                logger.exception(f'Failed to flatten characteristics for {repo_sample_id}')
+                errors += 1
+                continue
+
+            conn.execute(
+                'UPDATE sample SET source_metadata = %s WHERE id = %s',
+                (json.dumps(flattened), db_id),
+            )
+            updated += 1
+            logger.debug(f'Backfilled {repo_sample_id}')
+
+    conn.commit()
+
+    logger.info(f'Updated {updated} samples ({errors} errors)')
 
 
 # Use module main as integration test or quick script
