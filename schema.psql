@@ -72,7 +72,7 @@ create table if not exists normalisation_rule (
     rule_type        text not null,
 
     -- The pattern to match again source attribute value to indicate that the rule applies
-    -- Leave as null if source attribute value does not need to be matched and should be copied verbatium
+    -- Leave as null if source attribute value does not need to be matched and should be copied verbatim
     pattern          text not null,
     priority         integer not null default 0,
 

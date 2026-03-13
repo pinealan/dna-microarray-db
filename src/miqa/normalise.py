@@ -18,6 +18,8 @@ def match_value(src_attr_value: str, pattern: str, rule_type: str) -> bool:
     """
 
     # Make sure this set is in-sync with what's allowed in `rule_type` table in the DB
+    if rule_type == 'verbatim':
+        return True
     if rule_type == 'exact':
         return pattern.lower() == src_attr_value.lower()
     if rule_type == 'substring':
@@ -74,6 +76,9 @@ def apply_rules_to_sample(sample: dict, rules: list[dict]) -> dict:
             continue
         matched = first_matching_rule(src_attr_value, sorted_group)
         if matched:
-            changes[matched['target_attribute']] = matched['attribute_value']
+            if matched['rule_type'] == 'verbatim':
+                changes[matched['target_attribute']] = src_attr_value
+            else:
+                changes[matched['target_attribute']] = matched['attribute_value']
 
     return changes
