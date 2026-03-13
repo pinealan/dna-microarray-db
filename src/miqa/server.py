@@ -80,7 +80,7 @@ def _update_sample(conn, sample_id: int, changes: dict) -> None:
 def index():
     with get_conn() as conn:
         rules = _fetch_rules(conn)
-        preview_rows = _build_preview(conn, source='tissue', limit=50)
+        preview_rows = _build_preview(conn, source_attr='tissue', limit=50)
     return render_template(
         'index.html', rules=rules, preview_rows=preview_rows, preview_source='tissue'
     )
@@ -157,7 +157,7 @@ def preview():
     ids_raw = request.args.get('ids', '').strip()
     sample_ids = [s.strip() for s in ids_raw.split(',') if s.strip()] if ids_raw else None
     with get_conn() as conn:
-        rows = _build_preview(conn, source=source_attr, limit=limit, sample_ids=sample_ids)
+        rows = _build_preview(conn, source_attr=source_attr, limit=limit, sample_ids=sample_ids)
         rules = _fetch_rules(conn)
     return render_template(
         'partials/preview_table.html', preview_rows=rows, preview_source=source_attr, rules=rules
@@ -199,7 +199,7 @@ def apply_rules():
 
 
 def _build_preview(
-    conn, source: str, limit: int, sample_ids: list[str] | None = None
+    conn, source_attr: str, limit: int, sample_ids: list[str] | None = None
 ) -> list[dict]:
     """Fetch up to *limit* samples and apply rules to produce preview rows.
 
@@ -207,7 +207,7 @@ def _build_preview(
     the list are returned (the *limit* still applies).
     """
     rules = _fetch_rules(conn)
-    source_rules = [r for r in rules if r['source_attribute'] == source]
+    source_rules = [r for r in rules if r['source_attribute'] == source_attr]
 
     id_filter = ' AND repository_sample_id = ANY(%s)' if sample_ids else ''
     id_param = [sample_ids] if sample_ids else []
@@ -215,7 +215,7 @@ def _build_preview(
     rows = conn.execute(
         'SELECT id, repository_sample_id, source_metadata->>%s FROM sample'
         f' WHERE source_metadata ? %s{id_filter} LIMIT %s',
-        (source, source, *id_param, limit),
+        (source_attr, source_attr, *id_param, limit),
     ).fetchall()
 
     preview = []
