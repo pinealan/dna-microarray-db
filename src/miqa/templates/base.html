@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Normalisation Rules</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
@@ -14,124 +15,6 @@
     });
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 1rem; background: #f5f5f5; }
-    h1 { margin: 0 0 1rem; }
-
-    .app-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 1rem;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 2fr;
-      gap: 1rem;
-    }
-
-    .panel {
-      background: #fff;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      padding: 1rem;
-    }
-
-    .panel h2 { margin: 0 0 0.75rem; font-size: 1rem; color: #333; }
-
-    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #eee; }
-    th { background: #f8f8f8; font-weight: 600; }
-
-    input, select, button { font-size: 0.875rem; }
-    input[type=text], input[type=number], select {
-      padding: 0.3rem 0.5rem;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      width: 100%;
-    }
-
-    button {
-      cursor: pointer;
-      padding: 0.3rem 0.75rem;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      background: #fff;
-    }
-    button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-    button.danger  { background: #d93025; color: #fff; border-color: #d93025; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-
-    .rule-row td { vertical-align: top; }
-    .badge {
-      display: inline-block;
-      font-size: 0.75rem;
-      padding: 0.1rem 0.4rem;
-      border-radius: 3px;
-      background: #e8f0fe;
-      color: #174ea6;
-    }
-    .no-match { color: #999; }
-    .actions { white-space: nowrap; }
-    .actions button { margin-left: 0.25rem; }
-
-    .add-rule-section { margin-top: 1rem; border-top: 1px solid #eee; padding-top: 0.75rem; }
-    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-    .form-grid label { font-size: 0.8rem; color: #555; }
-
-    .toast {
-      display: inline-block;
-      margin-left: 1rem;
-      padding: 0.3rem 0.75rem;
-      background: #e6f4ea;
-      border: 1px solid #a8d5b5;
-      border-radius: 4px;
-      color: #1e4620;
-      font-size: 0.875rem;
-    }
-
-    .htmx-indicator { opacity: 0; transition: opacity 0.2s; }
-    .htmx-request .htmx-indicator { opacity: 1; }
-
-    nav { margin-bottom: 1.25rem; font-size: 0.875rem; }
-    nav a { color: #1a73e8; text-decoration: none; margin-right: 1rem; }
-    nav a:hover { text-decoration: underline; }
-    nav a.active { font-weight: 600; color: #174ea6; }
-
-    .bar-wrap { background: #eee; border-radius: 3px; height: 14px; min-width: 120px; }
-    .bar-fill  { background: #1a73e8; border-radius: 3px; height: 100%; }
-    .bar-fill.muted { background: #ccc; }
-
-    .stat-section { margin-bottom: 2rem; }
-    .stat-section h2 { font-size: 1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-bottom: 0.75rem; }
-    .dead-rule { color: #999; }
-
-    /* Prism handles background, padding, font-family, overflow, white-space. */
-    .json-viewer { font-size: 0.8rem; margin: 0; }
-
-    .inspector-float {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      max-height: 40vh;
-      background: #fff;
-      border-top: 2px solid #ddd;
-      box-shadow: 0 -2px 12px rgba(0,0,0,0.10);
-      padding: 0.6rem 1rem;
-      z-index: 100;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      overflow: hidden;
-    }
-
-    .inspector-body {
-      flex: 1;
-      min-height: 0;   /* allow flex child to shrink and scroll */
-      overflow-y: auto;
-    }
-  </style>
 </head>
 <body>
   <nav>
