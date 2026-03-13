@@ -164,6 +164,21 @@ def preview():
     )
 
 
+@app.get('/sample/inspect')
+def sample_inspect():
+    sample_id = request.args.get('id', '').strip()
+    if not sample_id:
+        return jsonify(None), 400
+    with get_conn() as conn:
+        row = conn.execute(
+            'SELECT source_metadata FROM sample WHERE repository_sample_id = %s LIMIT 1',
+            (sample_id,),
+        ).fetchone()
+    if row is None:
+        return jsonify(None), 404
+    return jsonify(row[0] or {})
+
+
 @app.post('/apply')
 def apply_rules():
     with get_conn() as conn:

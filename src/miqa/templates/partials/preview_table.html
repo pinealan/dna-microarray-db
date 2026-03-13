@@ -3,7 +3,7 @@
   Showing {{ preview_rows|length }} sample{{ 's' if preview_rows|length != 1 else '' }}
   for <strong>{{ preview_source }}</strong>
 </p>
-<table>
+<table x-data>
   <thead>
     <tr>
       <th>Sample ID</th>
@@ -15,7 +15,12 @@
   <tbody>
     {% for row in preview_rows %}
     <tr>
-      <td>{{ row.sample_id }}</td>
+      <td>
+        <span
+          style="cursor:pointer;color:#1a73e8;"
+          @click="$store.inspector.sampleId = '{{ row.sample_id }}'"
+        >{{ row.sample_id }}</span>
+      </td>
       <td>{{ row.raw_value }}</td>
       <td>
         {% if row.matched_rule %}

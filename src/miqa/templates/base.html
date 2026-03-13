@@ -4,7 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Normalisation Rules</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css" />
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+  <script>
+    document.addEventListener('alpine:init', () => {
+      Alpine.store('inspector', { sampleId: '' });
+    });
+  </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -99,6 +107,30 @@
     .stat-section { margin-bottom: 2rem; }
     .stat-section h2 { font-size: 1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; margin-bottom: 0.75rem; }
     .dead-rule { color: #999; }
+
+    /* Prism handles background, padding, font-family, overflow, white-space. */
+    .json-viewer { font-size: 0.8rem; margin: 0; }
+
+    .inspector-float {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      max-height: 40vh;
+      background: #fff;
+      border-top: 2px solid #ddd;
+      box-shadow: 0 -2px 12px rgba(0,0,0,0.10);
+      padding: 0.6rem 1rem;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      overflow: hidden;
+    }
+
+    .inspector-body {
+      flex: 1;
+      min-height: 0;   /* allow flex child to shrink and scroll */
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
