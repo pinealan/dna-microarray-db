@@ -5,37 +5,37 @@ No database or HTTP I/O — all functions accept plain dicts and return plain
 values, making them fully unit-testable without any external dependencies.
 """
 
-import fnmatch
 import re
 
 STRUCTURED_FIELDS = {'tissue', 'disease', 'gender', 'age', 'extraction_protocol'}
 
 
-def match_value(raw: str, pattern: str, rule_type: str) -> bool:
+def match_value(src_attr_value: str, pattern: str, rule_type: str) -> bool:
     """Return True if *raw* matches *pattern* according to *rule_type*.
 
-    rule_type must be one of 'substring', 'glob', or 'regex'.
+    rule_type must be one of 'exact', 'substring', or 'regex'.
     All comparisons are case-insensitive.
     """
+
+    # Make sure this set is in-sync with what's allowed in `rule_type` table in the DB
+    if rule_type == 'exact':
+        return pattern.lower() == src_attr_value.lower()
     if rule_type == 'substring':
-        return pattern.lower() in raw
-    if rule_type == 'glob':
-        return fnmatch.fnmatch(raw, pattern.lower())
+        return pattern.lower() in src_attr_value.lower()
     if rule_type == 'regex':
-        return bool(re.search(pattern, raw, re.IGNORECASE))
+        return bool(re.search(pattern, src_attr_value, re.IGNORECASE))
     raise ValueError(f'Unknown rule_type: {rule_type!r}')
 
 
-def first_matching_rule(raw: str, rules: list[dict]) -> dict | None:
+def first_matching_rule(src_attr_value: str, rules: list[dict]) -> dict | None:
     """Return the first rule in *rules* that matches *raw*, or None.
 
     *rules* must already be sorted by priority descending (highest first).
     The first match wins — subsequent rules are not evaluated.
     All comparisons are case-insensitive.
     """
-    raw = raw.lower()
     for rule in rules:
-        if match_value(raw, rule['pattern'], rule['rule_type']):
+        if match_value(src_attr_value, rule['pattern'], rule['rule_type']):
             return rule
     return None
 
@@ -69,10 +69,10 @@ def apply_rules_to_sample(sample: dict, rules: list[dict]) -> dict:
     for source_attr, group in groups.items():
         # Sort descending by priority so first_matching_rule picks the highest.
         sorted_group = sorted(group, key=lambda r: r['priority'], reverse=True)
-        raw = (sample.get('source_metadata') or {}).get(source_attr)
-        if not raw:
+        src_attr_value = (sample.get('source_metadata') or {}).get(source_attr)
+        if not src_attr_value:
             continue
-        matched = first_matching_rule(raw, sorted_group)
+        matched = first_matching_rule(src_attr_value, sorted_group)
         if matched:
             changes[matched['target_attribute']] = matched['attribute_value']
 

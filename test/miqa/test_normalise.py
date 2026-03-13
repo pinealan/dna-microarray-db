@@ -31,21 +31,19 @@ class TestMatchValueSubstring:
         assert not match_value('', 'blood', 'substring')
 
 
-class TestMatchValueGlob:
-    def test_wildcard_suffix(self):
-        assert match_value('brain cortex', 'brain*', 'glob')
-
-    def test_wildcard_prefix(self):
-        assert match_value('frontal cortex', '*cortex', 'glob')
+class TestMatchValueExact:
+    def test_exact_match(self):
+        assert match_value('whole blood', 'whole blood', 'exact')
 
     def test_case_insensitive(self):
-        assert match_value('Brain Cortex', 'brain*', 'glob')
+        assert match_value('Whole Blood', 'whole blood', 'exact')
+        assert match_value('whole blood', 'Whole Blood', 'exact')
+
+    def test_no_match_partial(self):
+        assert not match_value('peripheral whole blood cells', 'whole blood', 'exact')
 
     def test_no_match(self):
-        assert not match_value('liver', 'brain*', 'glob')
-
-    def test_exact_via_glob(self):
-        assert match_value('blood', 'blood', 'glob')
+        assert not match_value('PBMC', 'whole blood', 'exact')
 
 
 class TestMatchValueRegex:
@@ -67,7 +65,7 @@ class TestMatchValueRegex:
 
 def test_match_value_unknown_rule_type_raises():
     with pytest.raises(ValueError, match='Unknown rule_type'):
-        match_value('foo', 'bar', 'exact')
+        match_value('foo', 'bar', 'glob')
 
 
 # ---------------------------------------------------------------------------
